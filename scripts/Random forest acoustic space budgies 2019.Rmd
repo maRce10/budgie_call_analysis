@@ -1,0 +1,1639 @@
+---
+title: "Random forest acoustic space budgies 2019"
+author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas</a>
+ &nbsp; 
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: kable
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages, echo=F, eval=T, message=FALSE, warning=FALSE }
+
+rm(list = ls())
+
+# unload all non-based packages
+out <- sapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), function(x) try(detach(x, unload = FALSE, character.only = TRUE), silent = T))
+
+x<-c("warbleR", "readxl", "RColorBrewer", "ggplot2", "parallel", "ade4", "fossil", "vegan", "AICcmodavg", "nlme", "ecodist", "lme4", "Hmisc",  "compiler", "smacof", "pbapply", "caret", "randomForest", "corrplot", "kableExtra", "adehabitatHR", "spatstat", "raster", "cowplot", "MuMIn", "sjstats", "lmerTest")
+
+aa <- lapply(x, function(y) {
+  if(!y %in% installed.packages()[,"Package"])  {if(!y %in% c("warbleR", "Rraven")) install.packages(y) else devtools::install_github(paste0("maRce10/", y))
+}
+try(require(y, character.only = T), silent = T)
+  })
+
+```
+
+```{r functions and parameters, eval = T, echo = F}
+
+options("digits" = 6, "digits.secs" = 5, knitr.table.format = "html") 
+
+cols <- brewer.pal(10,"Spectral")
+
+prll <- detectCores() -1
+
+range.mat.0.1 <- function(mat, verbose = F){
+  
+if(verbose)  
+print(paste( "original range:", paste(round(range(mat[upper.tri(mat, diag=FALSE)]), 2), collapse = "-")))
+
+new.values <- mat[upper.tri(mat, diag=FALSE)] -  min(mat[upper.tri(mat, diag=FALSE)])  
+
+mat[upper.tri(mat)] <- new.values
+
+b <- mat[upper.tri(mat, diag=FALSE)] <- mat[upper.tri(mat, diag=FALSE)]/  max(mat[upper.tri(mat, diag=FALSE)])  
+
+mat <- t(mat)
+
+mat[upper.tri(mat, diag=FALSE)] <- b
+
+if(verbose)  
+print(paste( "new range:", paste(round(range(mat[upper.tri(mat, diag=FALSE)]), 2), collapse = "-")))
+
+return(mat)
+}
+
+range.mat.0.1 <- cmpfun(range.mat.0.1)
+
+path.recs <- "/media/twright/DATA/consolidated_files/"
+
+source("~/Dropbox/Documentos_R/Myfunctions/myfunctions.R")
+
+plot_acu_dens <- function(Y, x, mds_prox, ovlp)
+{   
+     Ypre <- Y[Y$period == "pre", ]
+  Ypost <- Y[Y$period == "post", ]
+  Gpost <- mds_prox[mds_prox$period == "post" & mds_prox$Cage == Y$Cage[1] & mds_prox$Bird.Name != bnm[x], ]
+Gpre <- mds_prox[mds_prox$period == "pre" & mds_prox$Cage == Ypre$Cage[1] & mds_prox$Bird.Name != bnm[x], ]  
+Y <- rbind(Y, Gpost)
+  
+  #select calls closest to mean acoustic space
+ if(nrow(Ypre) > 0)
+   {
+   mt <- rbind(data.frame(MDS1 = mean(Ypre[,"MDS1"]),MDS2 = mean(Ypre[,"MDS2"])), Ypre[,c("MDS1", "MDS2")])
+   
+   fspre <- Ypre$sound.files[which.min(as.matrix(dist(mt, upper = T))[-1,1])]
+        Zpre <- est[est$sound.files == fspre,, drop = FALSE][1,]
+         predur <- Zpre$end - Zpre$start
+         
+         } else predur <- 0
+        
+  if(nrow(Ypost) > 0)
+{    
+   mt2 <- rbind(data.frame(MDS1 = mean(Ypost[,"MDS1"]),MDS2 = mean(Ypost[,"MDS2"])), Ypost[,c("MDS1", "MDS2")])
+    fspost <- Ypost$sound.files[which.min(as.matrix(dist(mt2, upper = T))[-1, 1])]
+    Zpost <- est[est$sound.files == fspost, , drop = FALSE][1,]
+    postdur <- Zpost$end - Zpost$start
+ } else postdur <- 0
+   
+  if(nrow(Gpost) > 0)
+{
+         mt3 <- rbind(data.frame(MDS1 = mean(Gpost[,"MDS1"]),MDS2 = mean(Gpost[,"MDS2"])), Gpost[,c("MDS1", "MDS2")])
+    fspost2 <- Gpost$sound.files[which.min(as.matrix(dist(mt3, upper = T))[-1, 1])]
+    Zpost2 <- est[est$sound.files == fspost2, , drop = FALSE][1, , drop = FALSE]
+    postdur2 <- Zpost2$end - Zpost2$start
+}  else postdur2 <- 0
+
+
+  if(nrow(Gpre) > 0)
+{
+         mt4 <- rbind(data.frame(MDS1 = mean(Gpre[,"MDS1"]),MDS2 = mean(Gpre[,"MDS2"])), Gpre[,c("MDS1", "MDS2")])
+    fspre2 <- Gpre$sound.files[which.min(as.matrix(dist(mt4, upper = T))[-1, 1])]
+}
+
+  #adjust all to the same duration
+maxdur <- max(postdur, predur, postdur2)
+    if(maxdur > predur & nrow(Ypre) > 0) 
+    {
+    Zpre$start <- (Zpre$start - (maxdur-predur)/2)
+  Zpre$end <- (Zpre$end + (maxdur-predur)/2)
+  } 
+
+  if(maxdur > postdur & nrow(Ypost) > 0) 
+    {
+    Zpost$start <- (Zpost$start - (maxdur-postdur)/2)
+  Zpost$end <- (Zpost$end + (maxdur-postdur)/2)
+  } 
+  
+  if(maxdur > postdur2 & exists("Zpost2"))
+    if(nrow(Zpost2) > 0)
+    {
+    Zpost2$start <- (Zpost2$start - (maxdur-postdur)/2)
+  Zpost2$end <- (Zpost2$end + (maxdur-postdur)/2)
+  } 
+
+   if(nrow(Ypre) > 0)   
+    wpre <- read_wave(est, index = which(est$sound.files == Zpre$sound.files), from = ifelse(Zpre$start < 0, 0, Zpre$start), to = Zpre$end)
+
+if(nrow(Ypost) > 0)
+      wpost <- read_wave(est, index = which(est$sound.files == Zpost$sound.files), from = Zpost$start, to = Zpost$end)
+
+if(exists("Zpost2"))
+if(nrow(Zpost2) > 0)
+        wpost2 <- read_wave(est, index = which(est$sound.files == Zpost2$sound.files), from = Zpost2$start, to = Zpost2$end)
+
+  nf <- layout(matrix(c(9, 9, 9, 9, 1, 2, 5, 8, 1, 3, 6, 8, 1, 4, 7, 8), nr = 4, byrow=TRUE), widths=c(0.2, 1.5, 0.11, 3), heights=c(0.2, 1, 1, 1.4))
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F)
+ text(x = 1, y = 1.05, "Frequency (kHz)", srt = 90, cex = 2) 
+  par(mar = c(0, 2, 0, 0))
+  
+  if(nrow(Ypre) > 0)  
+  spectro(wpre, f = wpre@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+
+if(nrow(Ypost) > 0)  
+  spectro(wpost, f = wpost@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F,axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+ 
+if(exists("Zpost2"))
+{if(nrow(Zpost2) > 0)  
+{
+  par(mar = c(4, 2, 0, 0))  
+  spectro(wpost2, f = wpost2@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, cexaxis = 2, cexlab = 2)
+}
+  } else  plot(1, col = "white", frame.plot = F, axes = F)
+
+alpha <- 0.5
+colpre <- adjustcolor( "red2", alpha.f = alpha)  
+colpost <- adjustcolor( "cyan4", alpha.f = alpha)  
+colgrp <- adjustcolor( "gray", alpha.f = alpha)  
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colpre)
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colpost)
+
+par(mar = c(4, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F, xlab = "")
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colgrp)
+
+par(mar = c(4, 6, 0, 0))  
+basecex <- 2.3
+
+xlim <- range(acou.space[, 1])
+xlim[2] <-  xlim[2] * 1.15
+
+ylim <- range(acou.space[, 2])
+ylim[2] <-  ylim[2] * 1.45
+
+plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 2) 
+
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4], col = adjustcolor(cols[7], 0.1))
+
+
+par(bg = "white")
+polygon(x = acou.space[,1], y = acou.space[,2], col = "white", border = "white", lwd =1)
+
+usr <-  par("usr")
+
+if(nrow(Ypre) > 0) 
+{
+pp.coords.pre <- as.ppp(as.matrix(Ypre[, c("MDS1", "MDS2")]), usr)
+r.coords.pre <- raster(density.ppp(pp.coords.pre))
+
+msk.post <- mask(r.coords.pre, acu.sp.sp)
+
+image(msk.post, add = T, col=palpre)
+
+}
+
+
+if(nrow(Ypost) > 0)  
+{  
+
+pp.coords.post <- as.ppp(as.matrix(Ypost[, c("MDS1", "MDS2")]), usr)
+r.coords.post <- raster(density.ppp(pp.coords.post))
+
+msk.post <- mask(r.coords.post, acu.sp.sp)
+
+image(msk.post, add = T, col=palpost)
+  }
+
+polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  "white", lwd =4)
+polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  adjustcolor(cols[7], 0.1), lwd =4)
+
+legend(usr[2]-((usr[2] - usr[1]) * 0.45), usr[4]-((usr[4] - usr[3]) * 0.002), lty=c(1,1), col=c(colpre, colpost, colgrp, "black"), legend = c("Week 1", "Week 3", "Mate centroid week 1", "Mate centroid week 3"), pch = 20, lwd = 0, pt.cex= basecex * 1.5, cex = basecex * 0.5)
+
+#post group centroid
+if(nrow(Gpost) > 0) 
+{
+    points(x = Y$MDS1[Y$sound.files == fspost2], y = Y$MDS2[Y$sound.files == fspost2], col = "black", pch = 20, cex = basecex)
+    }
+
+# pre group centroid
+if(nrow(Gpre) > 0) 
+{
+    points(x = Gpre$MDS1[Gpre$sound.files == fspre2], y = Gpre$MDS2[Gpre$sound.files == fspre2], col = "gray", pch = 20, cex = basecex * 1.15)
+}
+
+# individual pre post centroids
+if(nrow(Ypre) > 0) 
+{points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = "black", pch = 20, cex = basecex * 1.4)
+points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = "white", pch = 20, cex = basecex)  
+points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = colpre, pch = 20, cex = basecex)
+}
+
+if(nrow(Ypost) > 0) 
+{   points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = "black", pch = 20, cex = basecex * 1.4)
+  points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = "white", pch = 20, cex = basecex)
+    points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = colpost, pch = 20, cex = basecex)
+}
+
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+text(1, labels = paste0(bnm[x], " (", Y$Treatment[1], ") post.ovlp =", ovlp), cex = 2)
+# dev.off()
+}
+
+gif_acu_dens <- function(Y, stp = 20)
+{   
+  Y <- Y[order(Y$date), ]
+  Ypre <- Y[Y$period == "pre", ]
+  Ypost <- Y[Y$period == "post", ]
+
+  #select calls closest to mean acoustic space
+ if(nrow(Ypre) > 0)
+   {
+   mt <- rbind(data.frame(MDS1 = mean(Ypre[,"MDS1"]),MDS2 = mean(Ypre[,"MDS2"])), Ypre[,c("MDS1", "MDS2")])
+   
+   fspre <- Ypre$sound.files[which.min(as.matrix(dist(mt, upper = T))[-1,1])]
+        Zpre <- est[est$sound.files == fspre, , drop = FALSE][1,]
+         predur <- Zpre$end - Zpre$start
+         
+         } else predur <- 0
+        
+  if(nrow(Ypost) > 0)
+{    
+   mt2 <- rbind(data.frame(MDS1 = mean(Ypost[,"MDS1"]),MDS2 = mean(Ypost[,"MDS2"])), Ypost[,c("MDS1", "MDS2")])
+    fspost <- Ypost$sound.files[which.min(as.matrix(dist(mt2, upper = T))[-1, 1])]
+    Zpost <- est[est$sound.files == fspost, , drop = FALSE][1,]
+    postdur <- Zpost$end - Zpost$start
+ } else postdur <- 0
+   
+
+alpha <- 0.5
+colpre <- adjustcolor( "red2", alpha.f = alpha)  
+colpost <- adjustcolor( "cyan4", alpha.f = alpha)  
+colgrp <- adjustcolor( "gray", alpha.f = alpha)  
+
+basecex <- 2.3
+
+xlim <- range(acou.space[, 1])
+# xlim[2] <-  xlim[2] * 1.15
+
+ylim <- range(acou.space[, 2])
+# ylim[2] <-  ylim[2] * 1.45
+
+unlink(list.files(pattern = "\\.tiff$"))
+
+tiff("fee%05d.tiff",res = 120, width = 800, height = 800)
+
+if(nrow(Ypre) > 10)
+sqpre <- round(seq(1, nrow(Ypre), length.out = stp)[-1]) else sqpre <- 10
+  
+out <- lapply(sqpre, function(q) {
+
+  plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 1.4) 
+
+  title(paste0(Y$Bird.Name[1], " (", Y$Treatment[1], ")"), cex = 2, line = 2)
+
+  usr <-  par("usr")
+  
+  rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4], col = adjustcolor(cols[7], 0.1))
+
+  # progress bar
+  sqpb <- seq(usr[1], usr[2], length.out = stp * 2)[-1]
+  lines(x = c(usr[1], sqpb[which(sqpre == q)]), y = rep(usr[4] * 1.07, 2), lwd = 7, col = colpre, xpd = TRUE)
+
+  text(x = sqpb[stp/2], y = usr[4] * 1.14, labels = "Week 1", xpd = TRUE)
+  
+  par(bg = "white")
+  polygon(x = acou.space[,1], y = acou.space[,2], col = "white", border = "white", lwd =1)
+  
+  pp.coords.pre <- as.ppp(as.matrix(Ypre[1:q, c("MDS1", "MDS2")]), usr)
+  
+  r.coords.pre <- raster(density.ppp(pp.coords.pre))
+
+  msk.pre <- mask(r.coords.pre, acu.sp.sp)
+
+  image(msk.pre, add = T, col=palpre)
+
+  # fix acu space border
+  polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  "white", lwd =4)
+  polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  adjustcolor(cols[7], 0.1), lwd =4)
+
+  if (nrow(Ypre) == q) return(msk.pre) else return(NA)
+  })
+
+msk.pre <- out[[length(out)]]
+
+if(nrow(Ypost) > 10)
+sqpost <- round(seq(1, nrow(Ypost), length.out = stp)[-1]) else sqpost <- 10
+
+out2 <- lapply(sqpost, function(q) {
+
+  plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 1.4) 
+
+  title(paste0(Y$Bird.Name[1], " (", Y$Treatment[1], ")"), cex = 2, line = 2)
+   usr <-  par("usr")
+  
+  rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4], col = adjustcolor(cols[7], 0.1))
+  
+  sqpb <- seq(usr[1], usr[2], length.out = stp * 2)[-1]
+  lines(x = c(sqpb[stp], sqpb[which(sqpost == q) + stp]), y = rep(usr[4] * 1.07, 2), lwd = 7, col = colpost, xpd = TRUE)
+
+    lines(x = c(usr[1], sqpb[stp]), y = rep(usr[4] * 1.07, 2), lwd = 7, col = colpre, xpd = TRUE)
+
+  text(x = sqpb[stp/2], y = usr[4] * 1.14, labels = "Pre period", xpd = TRUE)
+
+  
+  text(x = sqpb[(stp/2) + stp], y = usr[4] * 1.14, labels = "Week 3", xpd = TRUE)
+  
+  par(bg = "white")
+  polygon(x = acou.space[,1], y = acou.space[,2], col = "white", border = "white", lwd =1)
+  
+  pp.coords.post <- as.ppp(as.matrix(Ypost[1:q, c("MDS1", "MDS2")]), usr)
+  r.coords.post <- raster(density.ppp(pp.coords.post))
+
+  msk.post <- mask(r.coords.post, acu.sp.sp)
+
+  image(msk.pre, add = T, col=palpre2)
+
+  image(msk.post, add = T, col=palpost)
+ 
+  # fix acu space border
+  polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  "white", lwd =4)
+polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor("white", 0), border =  adjustcolor(cols[7], 0.1), lwd =4)
+   })
+
+
+graphics.off()
+
+unlink("fee00001.tiff")
+
+unlink(paste0(Y$Bird.Name[1], ".mp4"))
+system(paste0("ffmpeg -framerate 4 -i fee%05d.tiff -c:v libx264 -profile:v high -crf 2 -pix_fmt yuv420p ", Y$Bird.Name[1], ".mp4"))
+
+unlink(paste0(Y$Bird.Name[1], ".gif"))
+system(paste0("ffmpeg  -t 20 -ss 00:00:00 -i ", Y$Bird.Name[1],".mp4 ", Y$Bird.Name[1], ".gif"))
+
+unlink(list.files(pattern = "\\.tiff$"))
+}
+
+acu_dens_ovlp <- function(Y, acu.sp.sp, mds_prox, usr)
+{   
+  Ypre <- Y[Y$period == "pre", ]
+  Ypost <- Y[Y$period == "post", ]
+
+if(nrow(Ypre) > 0) 
+{
+pp.coords.pre <- as.ppp(as.matrix(Ypre[, c("MDS1", "MDS2")]), usr)
+r.coords.pre <- raster(density.ppp(pp.coords.pre))
+
+msk.pre <- mask(r.coords.pre, acu.sp.sp)
+
+# convert to range 0-1
+values(msk.pre) <- (values(msk.pre) - min(values(msk.pre), na.rm = TRUE)) 
+values(msk.pre) <- values(msk.pre)/ max(values(msk.pre), na.rm = TRUE)
+
+# keep 95% interval
+values(msk.pre)[values(msk.pre) < 0.05] <- NA
+}
+
+if(nrow(Ypost) > 0)  
+{  
+pp.coords.post <- as.ppp(as.matrix(Ypost[, c("MDS1", "MDS2")]), usr)
+r.coords.post <- raster(density.ppp(pp.coords.post))
+
+msk.post <- mask(r.coords.post, acu.sp.sp)
+
+# convert to range 0-1
+values(msk.post) <- (values(msk.post) - min(values(msk.post), na.rm = TRUE)) 
+values(msk.post) <- values(msk.post) / max(values(msk.post), na.rm = TRUE)
+
+# keep 95% interval
+values(msk.post)[values(msk.post) < 0.05] <- NA
+}
+
+  # test method
+  # msk.pre <- msk.post
+  # values(msk.pre)[sample(1:length(values(msk.pre)), size = (length(values(msk.pre)))*0.75)] <- 0
+  
+  
+try(values(msk.pre)[!is.na(values(msk.post)) & is.na(values(msk.pre))] <- 0, silent = TRUE)
+
+
+wgt.ovlp <- try_na(sum(values(msk.post) * (values(msk.post) - abs(values(msk.post) - values(msk.pre))), na.rm = TRUE) / sum(values(msk.post) * values(msk.post), na.rm = TRUE))
+return(wgt.ovlp)
+}
+
+plot_acu_space <- function(Y, x, mds_prox)
+    {
+  Ypre <- Y[Y$period == "pre", ]
+  Ypost <- Y[Y$period == "post", ]
+  Gpost <- mds_prox[mds_prox$period == "post" & mds_prox$Cage == Y$Cage[1] & mds_prox$Bird.Name != bnm[x], ]
+# W <- prepost[prepost$POSTpair == Y$POSTpair[1] & prepost$treatment == "Pre", ]
+Y <- rbind(Y, Gpost)
+  
+  #select calls closest to mean acoustic space
+ if(nrow(Ypre) > 0)
+   {
+   mt <- rbind(data.frame(MDS1 = mean(Ypre[,"MDS1"]),MDS2 = mean(Ypre[,"MDS2"])), Ypre[,c("MDS1", "MDS2")])
+   
+   fspre <- Ypre$sound.files[which.min(as.matrix(dist(mt, upper = T))[-1,1])]
+        Zpre <- est[est$sound.files == fspre,, drop = FALSE][1,]
+         predur <- Zpre$end - Zpre$start
+ } else predur <- 0
+        
+  if(nrow(Ypost) > 0)
+{    
+   mt2 <- rbind(data.frame(MDS1 = mean(Ypost[,"MDS1"]),MDS2 = mean(Ypost[,"MDS2"])), Ypost[,c("MDS1", "MDS2")])
+    fspost <- Ypost$sound.files[which.min(as.matrix(dist(mt2, upper = T))[-1, 1])]
+    Zpost <- est[est$sound.files == fspost, , drop = FALSE][1,]
+    postdur <- Zpost$end - Zpost$start
+ } else postdur <- 0
+   
+  if(nrow(Gpost) > 0)
+{
+         mt3 <- rbind(data.frame(MDS1 = mean(Gpost[,"MDS1"]),MDS2 = mean(Gpost[,"MDS2"])), Gpost[,c("MDS1", "MDS2")])
+    fspost2 <- Gpost$sound.files[which.min(as.matrix(dist(mt3, upper = T))[-1, 1])]
+    Zpost2 <- est[est$sound.files == fspost2, , drop = FALSE][1, , drop = FALSE]
+    postdur2 <- Zpost2$end - Zpost2$start
+}  else postdur2 <- 0
+ 
+  #and closest to group centroid
+  # mean(Y$MDS1[Y$indiv != x])
+  # G <- prepost[prepost$indiv != x,]
+  #  fsgroup <- as.character(G$file.sel[which.min(dist(G[,2:3], y = data.frame(mean(G[,2]), mean(G[,3]))))])
+  # Gcent <- sel.data[sel.data$sf.sel == fsgroup,]
+  # Gdur <- Gcent$end - Gcent$start
+
+  #adjust all to the same duration
+maxdur <- max(postdur, predur, postdur2)
+    if(maxdur > predur & nrow(Ypre) > 0) 
+    {
+    Zpre$start <- (Zpre$start - (maxdur-predur)/2)
+  Zpre$end <- (Zpre$end + (maxdur-predur)/2)
+  } 
+
+  if(maxdur > postdur & nrow(Ypost) > 0) 
+    {
+    Zpost$start <- (Zpost$start - (maxdur-postdur)/2)
+  Zpost$end <- (Zpost$end + (maxdur-postdur)/2)
+  } 
+  
+  if(maxdur > postdur2 & nrow(Zpost2) > 0) 
+    {
+    Zpost2$start <- (Zpost2$start - (maxdur-postdur)/2)
+  Zpost2$end <- (Zpost2$end + (maxdur-postdur)/2)
+  } 
+
+   if(nrow(Ypre) > 0)   
+    wpre <- read_wave(est, index = which(est$sound.files == Zpre$sound.files), from = Zpre$start, to = Zpre$end)
+
+if(nrow(Ypost) > 0)
+      wpost <- read_wave(est, index = which(est$sound.files == Zpost$sound.files), from = Zpost$start, to = Zpost$end)
+
+if(nrow(Zpost2) > 0)
+        wpost2 <- read_wave(est, index = which(est$sound.files == Zpost2$sound.files), from = Zpost2$start, to = Zpost2$end)
+
+  # tiff(filename = file.path("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/Acoustics space change with spectros and group centroid", paste0(x, ".tiff")), units = "px", width = 630, height = 480)
+
+  nf <- layout(matrix(c(9, 9, 9, 9, 1, 2, 5, 8, 1, 3, 6, 8, 1, 4, 7, 8), nr = 4, byrow=TRUE), widths=c(0.2, 1.5, 0.11, 3), heights=c(0.2, 1, 1, 1.4))
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F)
+ text(x = 1, y = 1.05, "Frequency (kHz)", srt = 90, cex = 2) 
+  par(mar = c(0, 2, 0, 0))
+  
+  if(nrow(Ypre) > 0)  
+  spectro(wpre, f = wpre@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+
+
+if(nrow(Ypost) > 0)  
+  spectro(wpost, f = wpost@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F,axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+ 
+
+if(nrow(Zpost2) > 0)  
+{
+  par(mar = c(4, 2, 0, 0))  
+  spectro(wpost2, f = wpost2@samp.rate, wl = wl, ovlp = ovlp, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, cexaxis = 2, cexlab = 2)
+} else  plot(1, col = "white", frame.plot = F, axes = F)
+
+alpha <- 0.5
+colpre <- adjustcolor( "red2", alpha.f = alpha)  
+colpost <- adjustcolor( "cyan4", alpha.f = alpha)  
+colgrp <- adjustcolor( "gray", alpha.f = alpha)  
+
+# Y$col <- as.character(Y$period)
+#   Y$col[Y$period ==  "pre"] <- cols
+#   Y$col[Y$period ==  "post"] <- col1 
+#     Y$col[Y$period ==  "post"] <- col3 
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colpre)
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colpost)
+
+par(mar = c(4, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F, xlab = "")
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = colgrp)
+
+par(mar = c(4, 6, 0, 0))  
+basecex <- 2.3
+
+#fix plot if points are overlapped by legend
+# a <- Y[Y$MDS1 > max(Y$MDS1) - (diff(range(Y$MDS1)) * 0.2) & Y$MDS2 > max(Y$MDS2) - (diff(range(Y$MDS2)) * 0.2),]
+# xlim <- c(min(Y$MDS1) - (diff(range(Y$MDS1)) * 0.035), max(Y$MDS1) + (diff(range(Y$MDS1)) * 0.35))
+# ylim <- c(min(Y$MDS2) - (diff(range(Y$MDS2)) * 0.035), max(Y$MDS2) + (diff(range(Y$MDS2)) * 0.35))
+
+xlim <- range(acou.space[, 1])
+xlim[2] <-  xlim[2] * 1.15
+
+ylim <- range(acou.space[, 2])
+ylim[2] <-  ylim[2] * 1.45
+
+# if(nrow(a) > 0)  
+plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 2) #else
+# plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", cex.lab = 2)
+
+#plot groups Post calls
+# points(x = Y$MDS1[Y$indiv != x], y = Y$MDS2[Y$indiv != x], col = col3, pch = 20, cex = basecex * 1.4)
+
+polygon(x = acou.space[,1], y = acou.space[,2], col = adjustcolor(cols[4], 0.2), border = adjustcolor(cols[4], 0.2), lwd =4)
+# plot(acou.space, add = T)
+#plot pre and post indiv calls
+if(nrow(Zpost2) > 0)  
+  points(x = Gpost$MDS1, y = Gpost$MDS2, col = colgrp, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Ypre) > 0)  
+points(x = Ypre$MDS1, y = Ypre$MDS2, col = colpre, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Ypost) > 0)  
+  points(x = Ypost$MDS1, y = Ypost$MDS2, col = colpost, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Gpost) > 0) 
+{
+  points(x = Y$MDS1[Y$sound.files == fspost2], y = Y$MDS2[Y$sound.files == fspost2], col = "white", pch = 20, cex = basecex)
+    points(x = Y$MDS1[Y$sound.files == fspost2], y = Y$MDS2[Y$sound.files == fspost2], col = colgrp, pch = 20, cex = basecex)}    
+
+
+if(nrow(Ypre) > 0) 
+{points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = "black", pch = 20, cex = basecex * 1.4)
+points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = "white", pch = 20, cex = basecex)  
+points(x = Y$MDS1[Y$sound.files == fspre], y = Y$MDS2[Y$sound.files == fspre], col = colpre, pch = 20, cex = basecex)
+}
+
+if(nrow(Ypost) > 0) 
+{   points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = "black", pch = 20, cex = basecex * 1.4)
+  points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = "white", pch = 20, cex = basecex)
+    points(x = Y$MDS1[Y$sound.files == fspost], y = Y$MDS2[Y$sound.files == fspost], col = colpost, pch = 20, cex = basecex)
+}
+
+if(nrow(Gpost) > 0) 
+{
+  points(x = Y$MDS1[Y$sound.files == fspost2], y = Y$MDS2[Y$sound.files == fspost2], col = "black", pch = 20, cex = basecex)
+}    
+
+  #   #plot groups Post calls centroid
+  #   mex <- mean(Y$MDS1[Y$indiv != x])
+  #   mey <- mean(Y$MDS2[Y$indiv != x])
+  #  points(x = mex, y = mey, col = "black", pch = 20, cex = basecex * 1.4)
+  # points(x = mex, y = mey, col = "white", pch = 20, cex = basecex)
+  #   points(x = mex, y = mey, col = col3, pch = 20, cex = basecex)
+  #   
+lims <- par("usr")  
+
+legend(lims[2]-((lims[2] - lims[1]) * 0.55), lims[4]-((lims[4] - lims[3]) * 0.002), lty=c(1,1), col=c(colpre, colpost, colgrp, "black"), legend = c("week 1", "week 3", "Cage mate", "Cage mate centroid"), pch = 20, lwd = 0, pt.cex= basecex * 1.5, cex = basecex * 0.5)
+  
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+text(1, labels = paste0(bnm[x], " (", Y$Treatment[1], ")"), cex = 2)
+# dev.off()
+}
+
+overdisp_fun <- function(model) {
+  ## number of variance parameters in 
+  ##   an n-by-n variance-covariance matrix
+  vpars <- function(m) {
+    nrow(m)*(nrow(m)+1)/2
+  }
+  model.df <- sum(sapply(VarCorr(model),vpars))+length(fixef(model))
+  rdf <- nrow(model.frame(model))-model.df
+  rp <- residuals(model,type="pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+
+```
+
+```{r link metadata, echo=F, eval=F}
+
+ext_sel <- readRDS("secondThirdRound.rds")
+
+ext_sel <- ext_sel[ext_sel$start - ext_sel$end < 0, ]
+
+# attributes(ext_sel)$check.results$sample.rate <- attributes(ext_sel)$check.results$sample.rate / 1000
+
+nrow(ext_sel)
+
+```
+
+```{r spectrograms, eval = FALSE, echo = FALSE}
+
+warbleR_options(wl = 300, ovlp = 90, bp = c(0.5, 9), parallel = prll, flim = c(0, 10))
+
+ext_sel$top.freq <- 6
+ext_sel$bottom.freq <- 0.5
+
+spectrograms(ext_sel, dest.path = "~/Dropbox/Documentos_R/Projects/Budgie calls/spectros-2019", line = TRUE)
+
+f_ext_sel <- filter_sels(ext_sel,path = "~/Dropbox/Documentos_R/Projects/Budgie calls/spectros-2019")
+
+weird <- filter_sels(ext_sel,path = "~/Dropbox/Documentos_R/Projects/Budgie calls/spectros-2019", missing = TRUE)
+
+spectrograms(weird, dest.path = "~/Dropbox/Documentos_R/Projects/Budgie calls/spectros-2019/weird", line = TRUE)
+
+
+saveRDS(f_ext_sel, "filter_est_2019.RDS")
+```
+
+```{r acoustic measurements all, eval = F, echo = F}
+
+est <- readRDS("filter_est_2019.RDS")
+
+sels.DTW <- dfDTW(X = est, wl = 300, length.out = 50, ovlp = 90, bp = c(0.5, 6), parallel = prll, clip.edges = T, img = FALSE)
+
+saveRDS(sels.DTW, "DTW results budgie calls 2019.RDS")
+
+
+sels.sp <- specan(X = est, wl = 300, ovlp = 90, bp = c(0.5, 6), parallel = prll, fast = T)
+
+saveRDS(sels.sp, "SP results long term budgie calls 2019.RDS")
+
+
+mfcc <- mfcc_stats(est, wl = 300, ovlp = 90, bp = c(0.5, 6))
+
+
+saveRDS(mfcc, "MFCC results long term budgie calls 2019.RDS")
+
+### 3 dimensions
+mds.dtw  <- cmdscale(sels.DTW, k = 5) 
+
+# mds_dtw3 <- bootmds(fit, sels.DTW, method.dat = "pearson", nrep = 10)
+
+saveRDS(mds.dtw, "MDS 5 dimensions on DTW distances 2019.RDS")
+
+
+
+source('~/Dropbox/warbleR/R/xcorr.R')
+
+sels.xcorr <- xcorr(X = est, wl = 512, ovlp = 50, bp = c(0.5, 6), parallel = prll, dens = 0.5)
+ 
+saveRDS(sels.xcorr, "x-corr results budgie calls 2019.RDS")
+
+fit  <- mds(delta = 1- sels.xcorr, ndim = 2) 
+  
+mds_xcorr <- bootmds(fit, 1 - sels.xcorr, method.dat = "pearson", nrep = 10)
+
+saveRDS(mds_xcorr, "MDS 2 dimensions on xcorr distances 2019.RDS")
+
+```
+
+```{r pool measurements together, eval = F, echo = F}
+
+mds.dtw <- readRDS("MDS 5 dimensions on DTW distances 2019.RDS")
+
+sels.sp <- readRDS("SP results long term budgie calls 2019.RDS")
+
+mfcc <- readRDS("MFCC results long term budgie calls 2019.RDS")
+
+colnames(mds.dtw) <- paste0("DTW.D", 1:ncol(mds.dtw))
+
+all.ap <- cbind(est, mds.dtw, sels.sp[, -c(1, 2)], mfcc[, -c(1, 2)])
+
+write.csv(all.ap, "Acoustic parameters budgie call 2019.csv", row.names = F)
+
+```
+
+## Data description
+```{r data description, eval = F, echo = F}
+
+all.ap <- read.csv("Acoustic parameters budgie call 2019.csv", stringsAsFactors = F)
+
+
+all.ap <- all.ap[!all.ap$call_type %in% c("C", "T", "T?"), ]
+
+print("Number of calls:")
+nrow(all.ap)
+
+# print("Data preview:")
+# 
+# kbl <- kable(pool_mtdt[1:20,], row.names = F, escape = FALSE, format = "html")
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 10)
+# scroll_box(kbl, height = "600px", width = "900px",
+# box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+
+
+print("Number of calls per treatment:")
+
+kbl <- kable(as.data.frame(t(as.matrix(table(all.ap$condition)))), row.names = F, escape = FALSE, format = "html")
+
+kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+kbl <- kable(as.data.frame(t(as.matrix(table(all.ap$individual)))), row.names = F, escape = FALSE, format = "html")
+
+Kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+print("Number of calls per cage:")
+
+kbl <- kable(as.data.frame(t(as.matrix(table(pool_mtdt$Cage)))), row.names = F, escape = FALSE, format = "html")
+
+kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per focal group:")
+
+kbl <- kable(as.data.frame(t(as.matrix(table(pool_mtdt$Focal.Group)))), row.names = F, escape = FALSE, format = "html")
+
+kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+# print("Number of calls per bird:")
+# 
+# kbl <- kable(as.data.frame((as.matrix(table(pool_mtdt$Bird.Name)))), row.names = T, col.names = F, escape = FALSE, format = "html")
+# 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# 
+# scroll_box(kbl, height = "600px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+
+
+# print("Number of calls per bird and treatment:")
+# 
+# mt <- as.matrix(table(pool_mtdt$Bird.Name, pool_mtdt$Treatment))
+# mt[mt == 0] <- ""
+# 
+# kbl <- kable(mt, row.names = T, escape = FALSE, format = "html")
+# 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# 
+# scroll_box(kbl, height = "600px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+# 
+# 
+# print("Number of calls per cage and bird:")
+# 
+# mt <- as.matrix(table(pool_mtdt$Bird.Name, pool_mtdt$Cage))
+# mt[mt == 0] <- ""
+# kbl <- kable(mt, row.names = T, escape = FALSE, format = "html") 
+# 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# 
+# scroll_box(kbl, height = "600px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+# 
+# 
+# print("Number of calls per call type:")
+# 
+# mt <- as.data.frame.matrix(t(table(pool_mtdt$Call.Type)))
+# 
+# kbl <- kable(t(mt), row.names = T, col.names = F, escape = FALSE, format = "html") 
+# 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# 
+# scroll_box(kbl, height = "600px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+# 
+# 
+# print("Number of calls per bird and call type:")
+# 
+# mt <- as.matrix(table(pool_mtdt$Bird.Name, pool_mtdt$Call.Type))
+# mt[mt == 0] <- ""
+# 
+# kbl <- kable(mt, row.names = T, escape = FALSE, format = "html") 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# scroll_box(kbl, height = "600px", width = "800px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+
+# 
+# print("Individual in 2 cages:")
+# 
+# mt <- as.matrix(table(pool_mtdt$Bird.Name, pool_mtdt$Cage))
+# mt[mt > 0] <- 1
+# 
+# cage.cnt <- apply(mt, 1, sum)
+# 
+# names(cage.cnt)[cage.cnt  == 2]
+# 
+# 
+# kbl <- kable(mt, row.names = T, escape = FALSE, format = "html") 
+# kbl <- kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+# scroll_box(kbl, height = "600px", width = "800px", box_css = "border: 1px solid #ddd; padding: 5px; ", extra_css = NULL)
+```
+
+```{r curing data, echo=F, eval=F, fig.width= 11, fig.height= 11}
+
+dat <- read.csv("Acoustic parameters budgie call 2019.csv", stringsAsFactors = F)
+
+dat <- dat[!dat$call_type %in% c("C", "T", "T?"), ]
+
+dat$selec <-  as.character(dat$selec)
+
+
+#leave Cerroincognita for testing
+
+pre.dat <- preProcess(dat[, 19:ncol(dat)], method = c("BoxCox", "center", "scale", "corr"), cutoff = 0.9)
+
+dat <- predict(pre.dat, dat)
+
+cm <- cor(dat[, 19:ncol(dat)])
+
+corrplot(cm, bg = "white", outline = F, addgrid.col = NA, order = "AOE")
+
+```
+
+```{r random forest, echo=F, eval=F}
+
+dat$call_type <- as.factor(dat$call_type)
+
+datRF <- dat[, 
+             c("call_type", "DTW.D1", "DTW.D2", "DTW.D3", "DTW.D4", "DTW.D5", "sd", "freq.median", "freq.Q25", "freq.Q75", "freq.IQR", "time.IQR", "skew", "time.ent", "entropy",  "sfm",   "mindom","maxdom","dfrange", "modindx",  "startdom", "enddom", "dfslope", "meanpeakf", "min.cc1", "min.cc2",  "min.cc3",  "min.cc4", "min.cc5", "min.cc6",  "min.cc7", "min.cc8",  "min.cc9",  "min.cc10", "min.cc11", "min.cc12", "min.cc13", "min.cc14", "min.cc15", "min.cc16", "min.cc17", "min.cc18", "min.cc19", "min.cc20", "min.cc21", "min.cc22", "min.cc23", "min.cc24", "min.cc25", "max.cc1",  "max.cc2", "max.cc3", "max.cc4", "max.cc5", "max.cc6", "max.cc7", "max.cc8",  "max.cc9", "max.cc10", "max.cc11", "max.cc12", "max.cc13", "max.cc14", "max.cc15", "max.cc16", "max.cc17", "max.cc18", "max.cc19", "max.cc20", "max.cc21", "max.cc22", "max.cc23", "max.cc24", "max.cc25", "median.cc2",  "median.cc6", "median.cc7", "median.cc12" ,"median.cc13", "median.cc14", "median.cc15", "median.cc16" ,"median.cc17" ,"median.cc18" ,"median.cc19", "median.cc20" ,"median.cc21" ,"median.cc23" ,"median.cc24" ,"median.cc25" ,"mean.cc1", "mean.cc3", "mean.cc4", "mean.cc5", "mean.cc8", "mean.cc9", "mean.cc10", "mean.cc11","mean.cc22","var.cc1", "var.cc2",  "var.cc3", "var.cc4", "var.cc5",  "var.cc6",  "var.cc7",  "var.cc8", "var.cc9",  "var.cc10", "var.cc11", "var.cc12", "var.cc13", "var.cc14", "var.cc15", "var.cc16", "var.cc17", "var.cc18", "var.cc19", "var.cc20", "var.cc21", "var.cc22", "var.cc23", "var.cc24", "var.cc25", "skew.cc1", "skew.cc2", "skew.cc3", "skew.cc4", "skew.cc5", "skew.cc6", "skew.cc7", "skew.cc8", "skew.cc9", "skew.cc10", "skew.cc11", "skew.cc12", "skew.cc13", "skew.cc14", "skew.cc15", "skew.cc16", "skew.cc17", "skew.cc18", "skew.cc19", "skew.cc20", "skew.cc21", "skew.cc22", "skew.cc23", "skew.cc24", "skew.cc25", "kurt.cc1", "kurt.cc2", "kurt.cc3", "kurt.cc4", "kurt.cc5", "kurt.cc6", "kurt.cc7", "kurt.cc8", "kurt.cc9", "kurt.cc10","kurt.cc11","kurt.cc12","kurt.cc13", "kurt.cc14", "kurt.cc15","kurt.cc16","kurt.cc17","kurt.cc18", "kurt.cc19", "kurt.cc20", "kurt.cc21", "kurt.cc22", "kurt.cc23", "kurt.cc24", "kurt.cc25")
+             ]
+
+rfmod <- randomForest(formula = call_type ~. , data =datRF , importance = T, proximity = T, ntree = 10000)
+
+saveRDS(rfmod, "Random forest model budgie calls 2019.RDS")
+
+```
+
+```{r unsupervised random forest, echo=F, eval=F}
+
+datURF <- dat[, 
+             c("DTW.D1", "DTW.D2", "DTW.D3", "DTW.D4", "DTW.D5", "sd", "freq.median", "freq.Q25", "freq.Q75", "freq.IQR", "time.IQR", "skew", "time.ent", "entropy",  "sfm",   "mindom","maxdom","dfrange", "modindx",  "startdom", "enddom", "dfslope", "meanpeakf", "min.cc1", "min.cc2",  "min.cc3",  "min.cc4", "min.cc5", "min.cc6",  "min.cc7", "min.cc8",  "min.cc9",  "min.cc10", "min.cc11", "min.cc12", "min.cc13", "min.cc14", "min.cc15", "min.cc16", "min.cc17", "min.cc18", "min.cc19", "min.cc20", "min.cc21", "min.cc22", "min.cc23", "min.cc24", "min.cc25", "max.cc1",  "max.cc2", "max.cc3", "max.cc4", "max.cc5", "max.cc6", "max.cc7", "max.cc8",  "max.cc9", "max.cc10", "max.cc11", "max.cc12", "max.cc13", "max.cc14", "max.cc15", "max.cc16", "max.cc17", "max.cc18", "max.cc19", "max.cc20", "max.cc21", "max.cc22", "max.cc23", "max.cc24", "max.cc25", "median.cc2",  "median.cc6", "median.cc7", "median.cc12" ,"median.cc13", "median.cc14", "median.cc15", "median.cc16" ,"median.cc17" ,"median.cc18" ,"median.cc19", "median.cc20" ,"median.cc21" ,"median.cc23" ,"median.cc24" ,"median.cc25" ,"mean.cc1", "mean.cc3", "mean.cc4", "mean.cc5", "mean.cc8", "mean.cc9", "mean.cc10", "mean.cc11","mean.cc22","var.cc1", "var.cc2",  "var.cc3", "var.cc4", "var.cc5",  "var.cc6",  "var.cc7",  "var.cc8", "var.cc9",  "var.cc10", "var.cc11", "var.cc12", "var.cc13", "var.cc14", "var.cc15", "var.cc16", "var.cc17", "var.cc18", "var.cc19", "var.cc20", "var.cc21", "var.cc22", "var.cc23", "var.cc24", "var.cc25", "skew.cc1", "skew.cc2", "skew.cc3", "skew.cc4", "skew.cc5", "skew.cc6", "skew.cc7", "skew.cc8", "skew.cc9", "skew.cc10", "skew.cc11", "skew.cc12", "skew.cc13", "skew.cc14", "skew.cc15", "skew.cc16", "skew.cc17", "skew.cc18", "skew.cc19", "skew.cc20", "skew.cc21", "skew.cc22", "skew.cc23", "skew.cc24", "skew.cc25", "kurt.cc1", "kurt.cc2", "kurt.cc3", "kurt.cc4", "kurt.cc5", "kurt.cc6", "kurt.cc7", "kurt.cc8", "kurt.cc9", "kurt.cc10","kurt.cc11","kurt.cc12","kurt.cc13", "kurt.cc14", "kurt.cc15","kurt.cc16","kurt.cc17","kurt.cc18", "kurt.cc19", "kurt.cc20", "kurt.cc21", "kurt.cc22", "kurt.cc23", "kurt.cc24", "kurt.cc25")
+             ]
+
+urfmod <- randomForest(x =datURF, importance = T, proximity = T, ntree = 10000)
+
+saveRDS(urfmod, "Unsupervised random forest model budgie calls 2019.RDS")
+
+```
+
+```{r unsupervised random forest by round, echo=F, eval=F}
+
+datURF <- dat[, 
+             c("DTW.D1", "DTW.D2", "DTW.D3", "DTW.D4", "DTW.D5", "sd", "freq.median", "freq.Q25", "freq.Q75", "freq.IQR", "time.IQR", "skew", "time.ent", "entropy",  "sfm",   "mindom","maxdom","dfrange", "modindx",  "startdom", "enddom", "dfslope", "meanpeakf", "min.cc1", "min.cc2",  "min.cc3",  "min.cc4", "min.cc5", "min.cc6",  "min.cc7", "min.cc8",  "min.cc9",  "min.cc10", "min.cc11", "min.cc12", "min.cc13", "min.cc14", "min.cc15", "min.cc16", "min.cc17", "min.cc18", "min.cc19", "min.cc20", "min.cc21", "min.cc22", "min.cc23", "min.cc24", "min.cc25", "max.cc1",  "max.cc2", "max.cc3", "max.cc4", "max.cc5", "max.cc6", "max.cc7", "max.cc8",  "max.cc9", "max.cc10", "max.cc11", "max.cc12", "max.cc13", "max.cc14", "max.cc15", "max.cc16", "max.cc17", "max.cc18", "max.cc19", "max.cc20", "max.cc21", "max.cc22", "max.cc23", "max.cc24", "max.cc25", "median.cc2",  "median.cc6", "median.cc7", "median.cc12" ,"median.cc13", "median.cc14", "median.cc15", "median.cc16" ,"median.cc17" ,"median.cc18" ,"median.cc19", "median.cc20" ,"median.cc21" ,"median.cc23" ,"median.cc24" ,"median.cc25" ,"mean.cc1", "mean.cc3", "mean.cc4", "mean.cc5", "mean.cc8", "mean.cc9", "mean.cc10", "mean.cc11","mean.cc22","var.cc1", "var.cc2",  "var.cc3", "var.cc4", "var.cc5",  "var.cc6",  "var.cc7",  "var.cc8", "var.cc9",  "var.cc10", "var.cc11", "var.cc12", "var.cc13", "var.cc14", "var.cc15", "var.cc16", "var.cc17", "var.cc18", "var.cc19", "var.cc20", "var.cc21", "var.cc22", "var.cc23", "var.cc24", "var.cc25", "skew.cc1", "skew.cc2", "skew.cc3", "skew.cc4", "skew.cc5", "skew.cc6", "skew.cc7", "skew.cc8", "skew.cc9", "skew.cc10", "skew.cc11", "skew.cc12", "skew.cc13", "skew.cc14", "skew.cc15", "skew.cc16", "skew.cc17", "skew.cc18", "skew.cc19", "skew.cc20", "skew.cc21", "skew.cc22", "skew.cc23", "skew.cc24", "skew.cc25", "kurt.cc1", "kurt.cc2", "kurt.cc3", "kurt.cc4", "kurt.cc5", "kurt.cc6", "kurt.cc7", "kurt.cc8", "kurt.cc9", "kurt.cc10","kurt.cc11","kurt.cc12","kurt.cc13", "kurt.cc14", "kurt.cc15","kurt.cc16","kurt.cc17","kurt.cc18", "kurt.cc19", "kurt.cc20", "kurt.cc21", "kurt.cc22", "kurt.cc23", "kurt.cc24", "kurt.cc25")
+             ]
+
+urfmod.R2 <- randomForest(x = datURF[dat$Round == 2, ], importance = T, proximity = T, ntree = 1000)
+
+saveRDS(urfmod.R2, "Unsupervised random forest model budgie calls round 2 2019.RDS")
+
+urfmod.R3 <- randomForest(x = datURF[dat$Round == 3, ], importance = T, proximity = T, ntree = 1000)
+
+saveRDS(urfmod.R3, "Unsupervised random forest model budgie calls round 3 2019.RDS")
+
+```
+
+```{r RF results, eval=F, echo=F, fig.width= 11, fig.height= 11}
+
+rfmod <- readRDS("Random forest model budgie calls 2019.RDS")
+
+confusionMatrix(data = rfmod$predicted, reference =  dat$call_type)$overall
+
+mat <- rfmod$confusion[,-ncol(rfmod$confusion)]
+
+dev <- as.vector(colSums(mat))
+conf.mat <- t(t(mat) / dev)
+conf.mat[is.na(conf.mat)] <- 0
+
+col1 <- colorRampPalette(c("#7F0000","red","#FF7F00","yellow","white",
+                           "cyan", "#007FFF", "blue","#00007F"))
+
+corrplot(conf.mat, is.corr = FALSE, method = "color", bg = "black")
+
+
+```
+
+### Sample sizes for males
+
+Number of calls per male. Males with no calls for 1 of the weeks analyzed are highligthed.
+
+```{r, eval = TRUE, echo = FALSE}
+
+UU <- read.csv("Sample sizes for males round 2 and 3 2019.csv", stringsAsFactors = FALSE)
+
+kbl <- kable(UU, row.names = FALSE, escape = FALSE, format = "html")
+
+kbl <- row_spec(kable_input = kbl, row = which(apply(UU[,2:3], 1, min) == 0), background = cols[5])
+
+kable_styling(kbl, bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+```
+
+
+
+### Error rate for unsupervised random forest
+```{r error rate, eval = T, echo=F}
+
+## Test data error rate
+
+rfmod2 <- readRDS("Unsupervised random forest model budgie calls round 2 2019.RDS")
+
+rfmod3 <- readRDS("Unsupervised random forest model budgie calls round 3 2019.RDS")
+
+print("Round 2")
+print(1- sum(rfmod2$votes[,1] > rfmod2$votes[,2])/ nrow(rfmod2$votes))
+
+print("Round 3")
+print(1- sum(rfmod3$votes[,1] > rfmod3$votes[,2])/ nrow(rfmod3$votes))
+
+
+```
+
+## Variable importance
+
+The relative contribution of each acoustic parameter to the random forest predictive model (only the 15 parameters with the highest contribution are shown) 
+
+```{r Variable importance, eval = T, echo=F, include=F}
+
+vimp <- varImpPlot(rfmod2, col = "black", pch = 20, pt.cex = 1.5, n.var = 15, main ="Random Forest classification of cultural evolution models")
+
+```
+
+
+### Round 2
+```{r Variable importance 2, eval = T, echo=F, include=T, fig.width = 13, fig.height = 7}
+
+vimp <- as.data.frame(vimp)
+vimp$params <- rownames(vimp)
+
+vimp <- vimp[order(vimp$MeanDecreaseAccuracy),]
+
+vimp$params <- as.factor(vimp$params)
+
+vimp$params <- factor(vimp$params, levels = vimp$params[!duplicated(vimp$params)])
+
+vimp <- vimp[(nrow(vimp)-15):nrow(vimp), ]
+
+theme_set(theme_classic(base_size = 30))
+ggplot(vimp, aes(x = MeanDecreaseAccuracy, y = params)) +
+  geom_segment(aes(yend = params),  xend = 0, color = "grey50", size = 1) + 
+  geom_point(size = 10, col = cols[8]) +
+	labs(x = "Mean decrease accuracy (RF)", y = "Predictors") + theme(legend.key.size = unit(2, 'lines')) +  scale_color_discrete(name = "Parameter set") +  scale_fill_discrete(guide = FALSE)
+
+```
+
+```{r Variable importance3, eval = T, echo=F, include=F}
+
+vimp <- varImpPlot(rfmod3, col = "black", pch = 20, pt.cex = 1.5, n.var = 15, main ="Random Forest classification of cultural evolution models")
+
+```
+
+### Round 3
+```{r Variable importance 4, eval = T, echo=F, include=T, fig.width = 13, fig.height = 7}
+
+vimp <- as.data.frame(vimp)
+vimp$params <- rownames(vimp)
+
+vimp <- vimp[order(vimp$MeanDecreaseAccuracy),]
+
+vimp$params <- as.factor(vimp$params)
+
+vimp$params <- factor(vimp$params, levels = vimp$params[!duplicated(vimp$params)])
+
+vimp <- vimp[(nrow(vimp)-15):nrow(vimp), ]
+
+
+theme_set(theme_classic(base_size = 30))
+ggplot(vimp, aes(x = MeanDecreaseAccuracy, y = params)) +
+  geom_segment(aes(yend = params),  xend = 0, color = "grey50", size = 1) + 
+  geom_point(size = 10, col = cols[8]) +
+	labs(x = "Mean decrease accuracy (RF)", y = "Predictors") + theme(legend.key.size = unit(2, 'lines')) +  scale_color_discrete(name = "Parameter set") +  scale_fill_discrete(guide = FALSE)
+
+```
+
+```{r RF get MDS 2 rounds, echo=F, eval= F}
+
+### 2 dimensions
+mds_urf_prox2  <- cmdscale(1-rfmod2$proximity, k = 2) 
+mds_urf_prox3  <- cmdscale(1-rfmod3$proximity, k = 2) 
+
+saveRDS(mds_urf_prox2, "Unsupervised random forest MDS budgie calls round 2 2019.RDS")
+
+saveRDS(mds_urf_prox3, "Unsupervised random forest MDS budgie calls round 3 2019.RDS")
+
+
+fit  <- mds(delta = 1-rfmod$proximity, ndim = 2) 
+  
+mds_rf_prox <- bootmds(fit, 1-rfmod$proximity, method.dat = "pearson", nrep = 5)
+
+saveRDS(mds_rf_prox, "Random forest MDS budgie calls 2019.RDS")
+
+#### unsupervised
+
+urfmod <- readRDS("Unsupervised random forest model budgie calls 2019.RDS")
+
+mds_urf_prox  <- cmdscale(1 - urfmod$proximity, k = 2) 
+
+saveRDS(mds_urf_prox, "Unsupervised random forest MDS budgie calls 2019.RDS")
+
+
+```
+
+
+Acoustic space defined by the 2 dimensions of a boostrap multidimensional scale analysis on the random forest proximity [(see here for details](https://stats.stackexchange.com/questions/137358/what-is-meant-by-proximity-in-random-forests)).
+
+```{r, echo=F, eval=T, fig.width= 8, fig.height= 6}
+
+dat <- read.csv("Acoustic parameters budgie call 2019.csv", stringsAsFactors = F)
+
+dat <- dat[!dat$call_type %in% c("C", "T", "T?"), ]
+
+
+
+mds_prox2 <- readRDS("Unsupervised random forest MDS budgie calls round 2 2019.RDS")
+
+mds_prox2 <- data.frame(dat[dat$Round == 2,!sapply(dat, is.numeric)], MDS1 = mds_prox2[,1], MDS2 = mds_prox2[,2])
+
+mds_prox2$call_type2 <- paste0(mds_prox2$call_type, 2)
+
+ggplot(mds_prox2, aes(x = MDS1, y = MDS2, color = call_type2), alpha = 0.5) +
+  geom_point(size = 2) + 
+  # stat_ellipse() +
+  ggtitle("Budgie call acoustic space round 2") +
+  theme_classic()
+
+
+mds_prox3 <- readRDS("Unsupervised random forest MDS budgie calls round 3 2019.RDS")
+
+mds_prox3 <- data.frame(dat[dat$Round == 3, !sapply(dat, is.numeric)], MDS1 = mds_prox3[,1], MDS2 = mds_prox3[,2])
+
+mds_prox3$call_type2 <- paste0(mds_prox3$call_type, 3)
+
+ggplot(mds_prox3, aes(x = MDS1, y = MDS2, color = call_type2), alpha = 0.5) +
+  geom_point(size = 2) + 
+  # stat_ellipse() +
+  ggtitle("Budgie call acoustic space round 3") +
+  theme_classic()
+
+```
+
+```{r acoustic space area change tru time, eval=F, echo=F}
+
+mds_prox <- rbind(mds_prox3, mds_prox2)
+
+mds_prox$sf2 <- paste0(sapply(mds_prox$sound.files, function(x) strsplit(x, ".wav")[[1]][1]), ".wav")
+
+mtdt <- read.csv("AllData_for_merging_gmk.csv")
+
+mds_prox$date <- sapply(mds_prox$sf2, function(x) 
+paste0("18-", mtdt$date.concate[mtdt$sound_files == x][1]))
+
+mds_prox$date <- as.Date(mds_prox$date, format = "%y-%m-%d")
+
+
+mds_prox$week <- sapply(mds_prox$sf2, function(x) 
+mtdt$week[mtdt$sound_files == x][1])
+
+mds_prox$week <- as.character(mds_prox$week)
+
+mds_prox$week <- sapply(mds_prox$week, function(x) strsplit(x, "\\.")[[1]][2])
+
+change.res <- pblapply(unique(mds_prox$individual[mds_prox$m_f%in% c("M", "m")]), cl = prll, function(x)
+  {
+  Z <- droplevels(mds_prox[mds_prox$individual == x, ])
+  
+    if(nrow(Z) > 1)
+    {
+    #distance per step
+      by <- 6
+      stps <- seq(3, nrow(Z) - by, by = by)
+      if(stps[length(stps)] < nrow(Z)) stps <- c(stps, nrow(Z)) 
+    
+      dist1step <- sapply(1:(length(stps) - 1),function(z) dist(Z[c(stps[z], stps[z + 1]), c("MDS1", "MDS2")]))
+  
+    #area per step
+    if(nrow(Z) > 3) {
+      area1step <- lapply(1:(length(stps) - 1), function(z)
+   {
+   area1 <- try(as.numeric(earth.poly(Z[1:stps[z],  c("MDS1", "MDS2")])$area), silent = TRUE) 
+  if (class(area1) == "try-error") area1 <- NA
+
+     area2 <- try(as.numeric(earth.poly(Z[1:(stps[z+1]),  c("MDS1", "MDS2")])$area), silent = TRUE) 
+  if (class(area2) == "try-error") area2 <- NA
+
+      return(data.frame(abs.area.chng = c(area2 - area1), rel.area.chng = c((area2 - area1)/area1)))
+  })
+
+  # area1step[[length(area1step) + 1]] <- data.frame(abs.area.chng = rep(NA, 2), rel.area.chng = rep(NA, 2))
+
+  area1step <- do.call(rbind, area1step)
+  
+  if (nrow(area1step) > length(dist1step)) dist1step <- c(dist1step, NA)
+  if (nrow(area1step) < length(dist1step)) dist1step <- dist1step[-length(dist1step)]
+
+  if (length(stps) > nrow(area1step)) stps <- stps[- length(stps)]
+  
+  outdf <- data.frame(indiv = Z$individual[1], day = Z$date[stps], week = Z$week[stps], dist = dist1step, abs.area.change =  area1step$abs.area.chng, cum.abs.area.change =  cumsum(area1step$abs.area.chng), rel.area.change = area1step$rel.area.chn, cum.rel.area.change = cumsum(area1step$rel.area.chn), n.calls = stps)
+  } else
+  {  
+     if (length(stps) > nrow(area1step)) stps <- stps[- length(stps)]
+  outdf <- data.frame(indiv = Z$individual[1], day = Z$date[stps], week = Z$week[stps], dist = dist1step, abs.area.change =  NA, cum.abs.area.change = NA, rel.area.change = NA, cum.rel.area.change =NA, n.calls = stps)}
+    
+   } else   outdf <- data.frame(indiv = Z$individual[1],  day = NA, week = NA, dist = NA, abs.area.change =  NA, cum.abs.area.change = NA, rel.area.change = NA, cum.rel.area.change = NA, n.calls = NA)
+   
+return(outdf)
+   }
+)
+
+change.res <- change.res[which(sapply(change.res, is.data.frame))]
+
+change.res <- do.call(rbind, change.res)
+
+# change.res <- lapply(unique(change.res$indiv), function(x) {
+#   X <- change.res[change.res$indiv == x, ]
+#   X$n.calls <- seq(3, 100000, by = 3)[1:nrow(X)]
+#   return(X)
+#   })
+# 
+# change.res <- do.call(rbind, change.res)
+
+
+change.res$treatment <- sapply(as.character(change.res$indiv), function(x) 
+mtdt$condition[mtdt$individual == x][1])
+
+write.csv(change.res, "acoustic space change tru time budgies 2019.csv", row.names = FALSE)
+
+```
+
+
+```{r, eval = F, echo=F, fig.width = 12, fig.height = 12, warning=F, dpi = 40, warning=F, message=F}
+
+## Change in acoustic space area through time
+
+These graphs show, for each individual, the cumulative (pink line) and relative (blue line) change in the area of its acoustic space (convex hull) as new calls are included. Relative change was defined as the change in acoustic space for the last 10 calls at any time. The calls were added in chronological order (as their were produced) and the period in which they occured is shown by the background color. If social group stability plays a role in acoustic "drift", then a bump in the acoustic space would be expected at the start of the "post" period in  birds in  novel social groups.
+
+change.res <- read.csv( "acoustic space change tru time budgies 2019.csv", stringsAsFactors = FALSE)
+
+change.res1 <- change.res[ , c("indiv", "n.calls", "cum.abs.area.change", "week", "treatment")]
+names(change.res1)[3] <- "area"
+change.res1$area.type <- "Cumulative"
+
+change.res2 <- change.res[ , c("indiv", "n.calls", "abs.area.change", "week", "treatment")]
+names(change.res2)[3] <- "area"
+change.res2$area.type <- "Relative (last 10 calls)"
+
+
+cr <- rbind(change.res1, change.res2)
+
+crout <- lapply(unique(cr$indiv), function(x) {
+  
+  X <- cr[cr$indiv == x, ]
+  
+  # X$mx.bx <- NA
+  #   X$min.bx[X$week == 3] <- X$mx.bx[X$period == 1] <- max(X$n.calls[X$period == "pre"], na.rm = TRUE)
+  # 
+  # X$min.bx[X$period == "pre"] <- 0
+  # 
+  # X$mx.bx[X$period == "post"] <- Inf
+
+  
+X <- X[seq.int(1, nrow(X), length.out = 50), ]
+
+wch.cum <- which(X$area.type == "Cumulative") 
+wch.rel <- which(X$area.type != "Cumulative") 
+X1 <- X[wch.cum[seq.int(1, length(wch.cum), length.out = 50)], ]
+X2 <- X[wch.rel[seq.int(1, length(wch.rel), length.out = 50)], ]
+
+X <- rbind(X1, X2)
+
+  return(X)  
+  })
+
+cr <- do.call(rbind, crout)
+
+
+# remove idnviduals with small samples
+# cr <- cr[!cr$indiv %in% c("SMO"),]
+
+cr$indiv_treatment <- paste0(cr$indiv, " (", cr$treatment, ")")
+
+cr$indiv_treatment <- factor(cr$indiv_treatment, levels = cr$indiv_treatment[!duplicated(cr$indiv_treatment)][order(cr$treatment[!duplicated(cr$indiv_treatment)])])
+
+cr.per <- cr[!duplicated(cr[, c("indiv","week")]),]
+
+
+ggplot(cr, aes(x = n.calls, y = area, col = area.type)) +
+   # geom_rect(aes(xmin =  min.bx, xmax = mx.bx, ymin = 0, ymax = Inf, fill = period), color = NA, size = 0.1, alpha = 0.5, data = cr.per) +
+  geom_line(size = 2) +
+  geom_point(size = 2, fill = "white", pch = 21) +
+  facet_wrap(~indiv_treatment, ncol = 2, scales = "free_x", dir = "v") +
+  scale_fill_manual('Period', values = cols[c(5,7)], labels = c("Pre", "Post")) + 
+  labs(x = "Number of calls", y = "Acoustic space area") +
+  theme_classic(base_size = 30) +
+  theme(axis.text.y=element_blank(), axis.ticks.y = element_blank(), legend.position = "top")
+
+```
+
+
+## Acoustic space plots with spectros
+
+These plots show the acoustic space covered by each individual in 2 ways: 
+  - Using dots to show the position of each of its calls in the acoustic space
+  - Using kernels to display the density of calls in acoustic space regions 
+  
+Both plot types are shown consecutively for each individual for comparison.  
+  
+```{r acoustic space plots with spectros- density plots and density overlap, eval = T, echo = F, out.width=650, dpi = 50}
+
+est <- readRDS("secondThirdRound.rds")
+
+# mtdt <- readRDS("budgie call extended selection table may-2018.RDS")
+
+alpha <- 0.5
+wl <- 200
+ovlp = 95
+
+# mds_rf_prox <- readRDS("Random forest MDS budgie calls 2018.RDS")
+# 
+# mds_prox <- mds_rf_prox$conf
+# 
+# mds_prox <- data.frame(dat[,!sapply(dat, is.numeric)], MDS1 = mds_prox[,1], MDS2 = mds_prox[,2])
+# 
+# mds_prox$date <- sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][2])
+# 
+# mds_prox$date <- ifelse(grepl("wav", mds_prox$date), sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][1]), mds_prox$date)
+
+# mds_prox$bird2 <- sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][1])
+# 
+# mds_prox$bird2 <- sapply(mds_prox$bird2, function(x) strsplit(x, "_")[[1]][1])
+# 
+# mds_prox <- mds_prox[which(mds_prox$bird2 == mds_prox$Bird.Name), ]
+# 
+# mds_prox$date <- gsub("FIE_G", "", mds_prox$date)
+# 
+# mds_prox$date <- as.Date(mds_prox$date, format = "%y-%m-%d")
+
+# mds_prox$period <- ifelse(grepl("transfer", mds_prox$Day.Week, ignore.case = TRUE), "post", "pre")
+
+mds_prox <- rbind(mds_prox3, mds_prox2)
+
+mds_prox$sf2 <- paste0(sapply(mds_prox$sound.files, function(x) strsplit(x, ".wav")[[1]][1]), ".wav")
+
+mtdt <- read.csv("AllData_for_merging_gmk.csv")
+
+mds_prox$date <- sapply(mds_prox$sf2, function(x) 
+paste0("18-", mtdt$date.concate[mtdt$sound_files == x][1]))
+
+mds_prox$date <- as.Date(mds_prox$date, format = "%y-%m-%d")
+
+mds_prox$week <- sapply(mds_prox$sf2, function(x) 
+mtdt$week[mtdt$sound_files == x][1])
+
+mds_prox$round <- sapply(mds_prox$sf2, function(x) 
+mtdt$Round[mtdt$sound_files == x][1])
+
+mds_prox$Cage <- sapply(mds_prox$sf2, function(x) 
+mtdt$cage[mtdt$sound_files == x][1])
+
+
+mds_prox$Cage <- paste(mds_prox$Cage, mds_prox$round, sep = "-")
+
+mds_prox$week <- as.character(mds_prox$week)
+
+mds_prox$week <- sapply(mds_prox$week, function(x) strsplit(x, "\\.")[[1]][2])
+
+mds_prox$period <-ifelse(mds_prox$week == 1, "pre", "post")
+
+mds_prox <- mds_prox[mds_prox$week != 2,]
+
+mds_prox$Treatment <- sapply(as.character(mds_prox$individual), function(x) 
+mtdt$condition[mtdt$individual == x][1])
+
+mds_prox$Bird.Name <- mds_prox$individual
+
+mds_prox <- mds_prox[order(mds_prox$Treatment, mds_prox$Bird.Name, mds_prox$date),]
+
+# for acoustic space circle
+acou.space <- mcp(SpatialPoints(coords = mds_prox[, c("MDS1", "MDS2")]))
+acou.space <- attributes(acou.space@polygons[[1]]@Polygons[[1]])$coords
+
+acu.sp.sp <- spPolygons(acou.space[, 1:2])
+
+palpre <-  colorRampPalette(c("white", "red2"))
+palpost <-  colorRampPalette(c("white", "cyan4"))
+
+colsn <- 10
+palpre2 <- sapply(1: colsn, function(x) adjustcolor(col =  palpre(colsn)[x], alpha = seq(0.2, 0.7, length.out = 20)[x]))
+palpre <- sapply(1: colsn, function(x) adjustcolor(col =  palpre(colsn)[x], alpha = seq(0.2, 1, length.out = 20)[x]))
+palpost <- sapply(1: colsn, function(x) adjustcolor(col =  palpost(colsn)[x], alpha = seq(0.2, 1, length.out = 20)[x]))
+
+# keep the ones with both pre and post periods (pre and post are weeks 1 and 3)
+U <- as.data.frame.matrix(table(mds_prox$Bird.Name, mds_prox$period))
+
+## save for sample size table
+UU <- as.data.frame.matrix(table(mds_prox$Bird.Name, mds_prox$period))
+
+names(UU) <- c("week 1", "week 3")
+
+UU$bird <- rownames(UU)
+
+UU <- UU[UU$bird %in% mds_prox$individual[mds_prox$m_f %in% c("M", "m")], ]
+
+UU <- UU[, c(3, 1, 2)]
+
+write.csv(UU, "Sample sizes for males round 2 and 3 2019.csv", row.names = FALSE)
+
+mds_prox <- mds_prox[mds_prox$Bird.Name %in% rownames(U[apply(U, 1, min) > 0,]) , ]
+
+bnm <- mds_prox$Bird.Name[order(mds_prox$Treatment)]
+
+#keep only males in names
+bnm <- bnm[mds_prox$m_f %in% c("M", "m")]
+
+bnm <- bnm[!duplicated(bnm)]
+
+
+# xlim <- range(acou.space[, 1])
+# xlim[2] <-  xlim[2] * 1.15
+# 
+# ylim <- range(acou.space[, 2])
+# ylim[2] <-  ylim[2] * 1.45
+# 
+# plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 2) 
+# 
+# usr <-  par("usr")
+
+usr <- c(-0.837610,  0.964833, -0.856565,  1.211185)
+
+
+## show the regions that have been allocated to each plot
+plts <- pblapply(1:length(bnm), function(x) {
+   Y <- mds_prox[mds_prox$Bird.Name == bnm[x], ]
+   tr <- try_na(plot_acu_space(Y, x = x, mds_prox = mds_prox))
+   dens.ovlp <- acu_dens_ovlp(Y, acu.sp.sp = acu.sp.sp, mds_prox = mds_prox, usr = usr)
+  dens.ovlp <- try_na(round(dens.ovlp, 2))
+   tr <- try_na(plot_acu_dens(Y, x = x, mds_prox = mds_prox, ovlp = dens.ovlp))
+  }
+  )
+
+# save overlaps only
+
+# ovlps <- pbsapply(1:length(bnm), function(x)   acu_dens_ovlp(Y = mds_prox[mds_prox$Bird.Name == bnm[x], ], acu.sp.sp = acu.sp.sp, mds_prox = mds_prox, usr = usr), cl = detectCores() - 1)
+# 
+# dens.ovlp <- data.frame(bird = bnm, dens.ovlp = ovlps)
+# 
+# dens.ovlp$Treatment <- sapply(as.character(dens.ovlp$bird), function(x) 
+# mtdt$condition[mtdt$individual == x][1])
+# 
+# write.csv(dens.ovlp, "Week_3_density_overlap_2019.csv", row.names = FALSE)
+
+```
+
+## Acoustic space overlap by treatment
+
+Graphs show the overlap between the acoustic space of week 3 vs week 1 (violin plot and boxplot show the same data):
+
+```{r, eval = TRUE, echo = FALSE}
+
+dens.ovlp <- read.csv("Week_3_density_overlap_2019.csv", stringsAsFactors = FALSE)
+
+ggplot(dens.ovlp, aes(x = Treatment, y = dens.ovlp)) +
+  geom_violin(fill = cols[5]) +
+  labs(y = "Acoustic space overlap\n (week 1 vs week 3)") +
+  theme_classic(base_size = 20)
+
+
+ggplot(dens.ovlp, aes(x = Treatment, y = dens.ovlp)) +
+  geom_boxplot(fill = cols[5]) +
+  labs(y = "Acoustic space overlap\n (week 1 vs week 3)") +
+  theme_classic(base_size = 20)
+
+```
+
+```{r stats, eval = F, echo = F}
+
+## Stats
+
+GLMM model:  
+
+$$\ density.post.overlap \sim Treatment + n + Focal.or.group + (1 | Cage)$$
+
+* *Focal.or.Group* predictor was dropped as no effect was detected
+
+
+dens.ovlp <- read.csv("Week_3_density_overlap_2019.csv", stringsAsFactors = FALSE)
+
+ggplot(dens.ovlp, aes(x = Treatment, y = dens.ovlp)) +
+  geom_violin()
+
+
+names(dens.ovlp)[1] <- "Bird.Name"
+
+mtdt <- readRDS("budgie call extended selection table may-2018.RDS")
+
+dens.ovlp <- merge(dens.ovlp, mtdt, by = "Bird.Name", all.y = F)
+
+dens.ovlp <- dens.ovlp[!duplicated(dens.ovlp$Bird.Name), c("Bird.Name"  ,"dens.ovlp", "Experiment", "Treatment", "Cage", "Focal.Group", "Focal")]
+
+dens.ovlp$n <- sapply(1:nrow(dens.ovlp), function(x) {
+  n <- nrow(mtdt[mtdt$Bird.Name == dens.ovlp$Bird.Name[x],])
+          if (is.null(n)) n <- NA
+  return(n)
+          }
+)
+
+dens.ovlp <- dens.ovlp[!is.na(dens.ovlp$n), ] 
+dens.ovlp$Cage <- as.character(dens.ovlp$Cage)
+
+dens.ovlp.org <- dens.ovlp
+
+pre.dens.ovlp <- dens.ovlp
+
+if (T)
+{
+  pre.dens.ovlp <- preProcess(dens.ovlp[, sapply(dens.ovlp, is.numeric)], method = c("BoxCox"))
+
+dens.ovlp[, sapply(dens.ovlp, is.numeric)] <- predict(pre.dens.ovlp, dens.ovlp[, sapply(dens.ovlp, is.numeric)])
+}
+
+nrow(dens.ovlp)
+
+glob_mod <- lme4::lmer(dens.ovlp ~ Treatment +  n  + Focal.Group + (1 | Cage), data = dens.ovlp, REML = FALSE)
+
+
+options(na.action = "na.fail")
+
+drg <- dredge(global.model = glob_mod, extra = alist(AIC, BIC, ICOMP, Cp))
+
+drg95 <- drg[1:(max(which(c(0.94, cumsum(drg$weight)) <= 0.95))),]
+  
+print("Best models")
+
+best_mod <- lmerTest::lmer(dens.ovlp ~ Treatment + n + (1 | Cage), data =  dens.ovlp, REML = FALSE)
+
+print("P values")
+summary(best_mod)
+
+if (nrow(drg95) > 1)  
+{mod_avg <- model.avg(drg95)
+ci <- confint(mod_avg, method = "Wald")} else {mod_avg <- fixef(best_mod)
+ci <- confint(best_mod, method = "Wald")
+}
+
+ci <- ci[!is.na(ci[,1]), ]
+ci <- t(ci)
+
+
+
+if (nrow(drg95) > 1)  mod.coeff <- mod_avg$coefficients else
+mod.coeff <- t(as.data.frame(fixef(best_mod)))
+
+ci <- rbind(mod.coeff, ci)
+
+ci <- t(as.data.frame(ci))
+
+
+ci.df <- data.frame(predictor = colnames(mod.coeff), effect = ci[, 1], CI2.5 = ci[, ncol(ci) - 1], CI.97.5 = ci[, ncol(ci)], stringsAsFactors = FALSE)[-1, ]
+
+ci.df$predictor[ci.df$predictor == "TreatmentStable"] <- "Treatment \n (stable-novel)"
+
+ci.df$predictor[ci.df$predictor == "Focal.GroupGroup"] <- "Focal.or.Group"
+
+print("Effect size and confidence intervals")
+
+ggplot(ci.df, aes(y = effect, x = predictor)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = CI2.5, ymax = CI.97.5)) +
+  labs(y = "Effect size") +
+  geom_hline(yintercept = 0, lty = 3) +
+ coord_flip()
+
+
+print("Boxplot")
+
+ggplot(dens.ovlp.org, aes(x = Treatment, y = dens.ovlp)) + 
+  geom_boxplot(fill = temp.colors(10)[5]) +
+  labs(y = "Post period overlap (%)")
+
+print("test assumptions")
+
+# test assupmptions
+qqnorm(resid(best_mod), main="normal qq-plot, residuals", col = topo.colors(1), pch = 20, cex = 2)
+
+qqline(resid(best_mod), col = adjustcolor("red", alpha.f = 0.7))
+
+overdisp(best_mod)
+
+```
+
+```{r gifs, eval = F, echo = F}
+
+# mtdt <- readRDS("budgie call extended selection table may-2018.RDS")
+# 
+# alpha <- 0.5
+# wl <- 200
+# ovlp = 95
+# 
+# mds_rf_prox <- readRDS("Random forest MDS budgie calls 2018.RDS")
+# 
+# mds_prox <- mds_rf_prox$conf
+# 
+# mds_prox <- data.frame(dat[,!sapply(dat, is.numeric)], MDS1 = mds_prox[,1], MDS2 = mds_prox[,2])
+# 
+# mds_prox$date <- sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][2])
+# 
+# mds_prox$date <- ifelse(grepl("wav", mds_prox$date), sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][1]), mds_prox$date)
+# 
+# mds_prox$bird2 <- sapply(mds_prox$sound.files, function(x) strsplit(x, " ")[[1]][1])
+# 
+# mds_prox$bird2 <- sapply(mds_prox$bird2, function(x) strsplit(x, "_")[[1]][1])
+# 
+# mds_prox <- mds_prox[which(mds_prox$bird2 == mds_prox$Bird.Name), ]
+# 
+# mds_prox$date <- gsub("FIE_G", "", mds_prox$date)
+# 
+# mds_prox$date <- as.Date(mds_prox$date, format = "%y-%m-%d")
+# 
+# mds_prox$period <- ifelse(grepl("transfer", mds_prox$Day.Week, ignore.case = TRUE), "post", "pre")
+# 
+# mds_prox <- mds_prox[order(mds_prox$Treatment, mds_prox$Bird.Name, mds_prox$date),]
+# 
+# # for acoustic space circle
+# acou.space <- mcp(SpatialPoints(coords = mds_prox[,9:10]))
+# acou.space <- attributes(acou.space@polygons[[1]]@Polygons[[1]])$coords
+# 
+# acu.sp.sp <- spPolygons(acou.space[, 1:2])
+# 
+# palpre <-  colorRampPalette(c("white", "red2"))
+# palpost <-  colorRampPalette(c("white", "cyan4"))
+# 
+# colsn <- 10
+# palpre2 <- sapply(1: colsn, function(x) adjustcolor(col =  palpre(colsn)[x], alpha = seq(0.2, 0.7, length.out = 20)[x]))
+# palpre <- sapply(1: colsn, function(x) adjustcolor(col =  palpre(colsn)[x], alpha = seq(0.2, 1, length.out = 20)[x]))
+# palpost <- sapply(1: colsn, function(x) adjustcolor(col =  palpost(colsn)[x], alpha = seq(0.2, 1, length.out = 20)[x]))
+# 
+# bnm <- c("SEA", "ZUC", "PLA", "JEW", "TAN", "SWA")
+
+# xlim <- range(acou.space[, 1])
+# xlim[2] <-  xlim[2] * 1.15
+# 
+# ylim <- range(acou.space[, 2])
+# ylim[2] <-  ylim[2] * 1.45
+# 
+# plot(x = Y$MDS1, y = Y$MDS2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 2) 
+# 
+# usr <-  par("usr")
+
+usr <- c(-0.837610,  0.964833, -0.856565,  1.211185)
+
+# unique(mds_prox$Day.Week)
+# 
+# mds_prox$week <- 
+# as.numeric(gsub("[^\\d]+", "", mds_prox$Day.Week, perl=TRUE))
+# 
+# unique(gsub("(\\d{1})(?=\\d{2})", "\\1:", mds_prox$week, perl = TRUE))
+
+
+setwd("./Budgie gifs 2019/")
+
+## show the regions that have been allocated to each plot
+plts <- pblapply(1:length(bnm), function(x) {
+  
+  Y <- mds_prox[mds_prox$Bird.Name == bnm[x], ]
+  Y <- Y[order(Y$date), ]
+  
+  a <-try_na(gif_acu_dens(Y, stp = 20)) 
+  
+  return(a)  
+  })
+
+```
+
+
+---
+
+---
+
+<font size="4">Session information</font>
+
+```{r session info, echo=F}
+
+sessionInfo()
+
+```

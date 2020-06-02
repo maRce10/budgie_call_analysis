@@ -1,0 +1,4769 @@
+---
+title: "Budgie call analysis LONGTERM"
+author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas</a>
+ &nbsp; 
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    self_contained: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+
+```{r packages, echo=F, eval=T, message=FALSE,warning=FALSE,}
+
+rm(list = ls())
+
+# unload all non-based packages
+out <- sapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), function(x) try(detach(x, unload = FALSE, character.only = TRUE), silent = T))
+
+
+x<-c("warbleR", "readxl", "ggplot2", "dtw", "parallel", "ade4", "gridExtra", "fossil", "vegan", "AICcmodavg", "nlme", "ecodist", "lme4", "Hmisc", "stringdist",  "compiler", "smacof", "pbapply", "caret", "randomForest", "e1071", "corrplot", "diagram", "kableExtra", "pbapply", "Rraven")
+
+aa <- lapply(x, function(y) {
+  if(!y %in% installed.packages()[,"Package"])  {if(!y %in% c("warbleR", "Rraven", "NatureSounds")) install.packages(y) else devtools::install_github(paste0("maRce10/", y))
+}
+try(require(y, character.only = T), silent = T)
+  })
+
+options("digits" = 6, "digits.secs" = 5, knitr.table.format = "html", results = 'asis') 
+
+```
+
+```{r functions and parameters, eval = T, echo = F}
+
+prll <- detectCores() -1
+
+bootMDS <- function(mat, method, ndim, type, stress = TRUE)
+{  
+  fit  <- mds(delta = mat, ndim, type) 
+  
+  fit$call[[3]] <-  ndim            
+
+  be <- bootmds(fit, mat, method.dat = method, nrep = 1)
+
+  if(stress)
+return(mean(be$stressvec)) else return(be)
+  
+}
+
+bootMDS <- cmpfun(bootMDS)
+
+
+range.mat.0.1 <- function(mat, verbose = F){
+  
+if(verbose)  
+print(paste( "original range:", paste(round(range(mat[upper.tri(mat, diag=FALSE)]), 2), collapse = "-")))
+
+new.values <- mat[upper.tri(mat, diag=FALSE)] -  min(mat[upper.tri(mat, diag=FALSE)])  
+
+mat[upper.tri(mat)] <- new.values
+
+b <- mat[upper.tri(mat, diag=FALSE)] <- mat[upper.tri(mat, diag=FALSE)]/  max(mat[upper.tri(mat, diag=FALSE)])  
+
+mat <- t(mat)
+
+mat[upper.tri(mat, diag=FALSE)] <- b
+
+if(verbose)  
+print(paste( "new range:", paste(round(range(mat[upper.tri(mat, diag=FALSE)]), 2), collapse = "-")))
+
+return(mat)
+}
+
+range.mat.0.1 <- cmpfun(range.mat.0.1)
+
+path <- ifelse(Sys.info()["nodename"] %in% c("m-dell", "m-MacBookPro"), "~/Dropbox/Documentos R/Projects/Budgie calls/", "~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/") 
+
+
+path.recs <- "/media/twright/DATA/consolidated_files/"
+
+```
+
+```{r link data excel sound files and selections, echo=F, eval=F}
+
+datalog <- readxl::read_excel("~/Dropbox (NMSU Advanced)/FoxP2 Call Analysis/Dahlin FemGroup Spreadsheet.xlsx")
+
+# str(datalog)
+
+datalog <- datalog[!is.na(datalog$`Wav File`), ]
+
+
+wavs<-list.files(path = "~/Dropbox (NMSU Advanced)/FoxP2 Call Analysis/", pattern = "wav$",ignore.case = T, full.names = T, recursive = T)
+
+datalog$sound.files <- datalog$`Wav File`
+
+datalog <- match_wav_case(X = datalog, path = path.recs, verbose = FALSE)
+
+View(datalog)
+
+sound.files <- basename(wavs)
+sound.files.fp <- wavs
+sound.files.fp <- sound.files.fp[!duplicated(sound.files)]
+sound.files <- sound.files[!duplicated(sound.files)]
+length(sound.files)
+# length(sound.files.fp)
+
+
+wavleft <- setdiff(sound.files, datalog$sound.files)
+
+wavleft <- grep("\\(1\\)", wavleft, invert = T, value = T)
+
+
+## could not find
+
+dfleft <- setdiff(datalog$sound.files, sound.files)
+
+
+res <- pblapply(wavleft, cl = detectCores() - 1, function(x)
+{a <- stringdist(x, dfleft, method = "osa", weight = c(d = 1, i = 0.5, s = 1, t = 1))
+return(data.frame(wav = x, dfname = dfleft[which.min(a)], mindif = min(a)))  
+}  )
+
+res <- do.call(rbind, res)
+
+resOK <- res[res$mindif < 2,]
+
+datalog1 <- datalog[datalog$`Wav File` %in% sound.files, ]
+
+datalog1$sound.files <- datalog1$`Wav File`
+
+# nrow(datalog1)
+
+datalog2 <- datalog[datalog$`Wav File` %in% resOK$dfname, ]
+
+datalog2 <- datalog2[match(datalog2$`Wav File`, resOK$dfname),]
+
+# nrow(datalog2)
+# nrow(resOK)
+
+datalog2$sound.files <- resOK$wav
+
+
+fixdl <- rbind(datalog1, datalog2)
+
+# nrow(fixdl)
+
+setdiff(fixdl$sound.files, sound.files)
+setdiff(sound.files, fixdl$sound.files)
+
+
+fixdl <- fixdl[!duplicated(fixdl$sound.files),]
+
+
+fixdl$full.path <- unlist(pblapply(fixdl$sound.files, function(x) sound.files.fp[basename(sound.files.fp) == x][1], cl = detectCores() - 1))
+
+# View(fixdl)
+
+
+write.csv(fixdl, "~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/Fixed metadata long term budgie calls 2017.csv", row.names = F)
+
+
+fixdl2 <- match_wav_case(X = fixdl, path = path.recs)
+
+resBAD <- res[res$mindif >= 2,]
+
+#sound files not in metadata
+grid.table(setdiff(sound.files, fixdl$sound.files))
+
+names(resBAD) <- c("sound.files", "best match in metadata", "")
+
+#dev.off()
+ grid.table(resBAD[,-3])
+
+
+```
+
+```{r consolidate, eval = F, echo = F}
+
+sf.df <- read.csv(file.path(path, "Fixed metadata long term budgie calls 2017.csv"), stringsAsFactors = FALSE)
+
+cnsld.df <- warbleR::consolidate(files = sf.df$full.path, dest.path = "/media/twright/DATA/consolidated_files/", parallel = detectCores() - 1, overwrite = F)
+
+
+# str(cnsld.df)
+
+df <- cbind(sf.df, cnsld.df)
+
+head(df)
+
+cw <- checkwavs(path = "/media/twright/DATA/consolidated_files/")
+
+durs <- wavdur(files = df$sound.files, path = "/media/twright/DATA/consolidated_files/")
+
+mean(durs$duration)
+range(durs$duration)
+
+
+df$start <- 0.001
+
+all.equal(as.character(durs$sound.files), df$sound.files)
+
+df$end <- durs$duration - 0.001
+
+View(df)
+
+df <- df[, grep("old|new", colnames(df), invert = TRUE)]
+  
+df$selec <- 1
+
+write.csv(df, "~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/Selection and metadata long term budgie calls 2017.csv", row.names = F)
+
+```
+
+```{r autodetec, eval = F, echo = F}
+
+sels <- read.csv("~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/Selection and metadata long term budgie calls 2017.csv") 
+
+cs <- checksels(sels, check.header = T, parallel = detectCores() - 1, path = "/media/twright/DATA/consolidated_files/")
+
+unique(cs$check.res)
+
+str(sels)
+
+ad <- autodetec(X = sels, threshold = 13, ssmooth = 800, bp = c(0.5, 8),osci = F, wl = 300, mindur = 0.06, maxdur = 0.5, img = F, parallel = detectCores() - 1, ls = F, redo = T, path = "/media/twright/DATA/consolidated_files/")
+
+imgs <- list.files( path = "/media/twright/DATA/consolidated_files/", pattern = "\\.jpeg$")
+
+rmn.ad <- ad[ad$sound.files %in% gsub("-1-autodetec-.jpeg",".wav", imgs),]
+
+mssng.ad <- ad[!ad$sound.files %in% gsub("-1-autodetec-.jpeg",".wav", imgs),]
+
+saveRDS(list(rmn.ad, mssng.ad), "~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/autodetec_results.RDS")
+
+
+```
+
+```{r seltailor, echo=F, eval = F}
+
+#read badones
+sels <- readRDS("~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/autodetec_results.RDS")[[2]]
+
+
+seltailor(sels[!is.na(sels$start),], path = "/media/twright/DATA/consolidated_files/", ext.window = F, auto.next = T, flim = c(1, 6.6))
+
+
+tl.sels <- read.csv("/media/twright/DATA/consolidated_files/seltailor_output.csv")
+
+tl.sels <- tl.sels[tl.sels$tailored == "y",]
+
+str(tl.sels)
+
+g.sels <- readRDS("~/Dropbox (NMSU Advanced)/Araya-Salas_Marcelo/Documentos R/Projects/Budgie calls/autodetec_results.RDS")[[1]]
+
+
+sels <- rbind(g.sels, tl.sels[,-5])
+
+sels <- sels[!is.na(sels$start),]
+
+write.csv(sels, file.path(path, "Tailored selections long term budgie calls 2017.csv"), row.names = F)
+
+```
+
+```{r add metadata, eval = F, echo = F}
+
+sels <- read.csv(file.path(path, "Tailored selections long term budgie calls 2017.csv"))
+
+sf.df <- read.csv(file.path(path, "Fixed metadata long term budgie calls 2017.csv"), stringsAsFactors = FALSE)
+
+str(sels)
+str(sf.df)
+length(which(sels$sound.files %in% sf.df$sound.files))
+
+md.sels <- merge(x = sels, sf.df[,c("Experiment", "Treatment", "Cage", "Bird.Name", "Focal.Group", "Day.Week", "Call.Type", "full.path", "sound.files")], by = "sound.files")
+
+write.csv(md.sels, file.path(path, "Selections and metadata long term budgie calls 2017.csv"), row.names = F)
+
+```
+
+```{r measure SNR, eval = F, echo = F}
+
+sels <- read.csv(file.path(path, "Selections and metadata long term budgie calls 2017.csv"))
+
+snr.sels <- sig2noise(X = sels, mar = 0.02, parallel = detectCores() - 1, path = "/media/twright/DATA/consolidated_files/", type = 3)
+
+write.csv(snr.sels, file.path(path, "Selections, snr and metadata long term budgie calls 2017.csv"), row.names = F)
+
+#choose high SNR
+
+table(snr.sels$Call.Type)
+
+snr.sels$Bird.Call.Type <- paste(snr.sels$Bird.Name, snr.sels$Call.Type)
+
+hisnr.sels <- snr.sels[ave(-snr.sels$SNR, snr.sels$Bird.Call.Type, FUN = rank) <= 5, ]
+  
+table(hisnr.sels$Call.Type)
+
+table(hisnr.sels$Bird.Call.Type)
+
+
+nrow(hisnr.sels)
+
+
+write.csv(hisnr.sels, file.path(path, "High SNR selections and metadata long term budgie calls 2017.csv"), row.names = F)
+```
+
+```{r fix data, eval=F, echo=F}
+
+sels <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2017.csv"), stringsAsFactors = F)
+
+### fix names
+femcall.focal <- read_excel("FemCalls_SummaryData_CHRIS.xls")
+femcall.all <- read_excel("FemCalls_SummaryData_CHRIS.xls", sheet = 2, skip = 1, col_names = c("Cage", "Bird", "Week", "Date", "Date2", "Junk", "n.calls"))
+
+femcall.all$Bird <- gsub(" ", "", femcall.all$Bird)
+  
+  
+setdiff(unique(femcall.all$Bird), unique(sels$Bird.Name))
+
+
+datalog <- readxl::read_excel("~/Dropbox (NMSU Advanced)/FoxP2 Call Analysis/Dahlin FemGroup Spreadsheet.xlsx")
+
+sels$Treatment <- pbsapply(1:nrow(sels),cl = prll, function(x)
+  {
+    datalog$Treatment[datalog$Cage == sels$Cage[x] &  datalog$`Bird Name` == sels$Bird.Name[x]][1] 
+  })
+
+
+any(is.na(sels$Treatment))
+
+
+sels$Focal <- pbsapply(1:nrow(sels),cl = prll, function(x)
+  {
+if(sels$Bird.Name[x] %in% femcall.focal$Bird) return("focal") else return("non.focal")
+  
+  })
+
+table(sels$Focal)
+
+
+# sels$Bird.Name <- pbsapply(1:nrow(sels),cl = prll, function(x)
+#   {
+#     datalog$Treatment[datalog$Cage == sels$Cage[x] &  datalog$`Bird Name` == sels$Bird.Name[x]][1] 
+#   })
+
+
+table(sels$Bird.Name)
+
+
+# sels[sels$Bird.Name %in% c("SNO", "SNO ", "SMO"), c("Bird.Name","Cage", "Treatment")]
+# 
+# sels$Bird.Name[sels$Bird.Name == "SNO "] <- "SNO"
+
+
+write.csv(sels, file.path(path, "Selections, snr and metadata long term budgie calls 2018.csv"), row.names = FALSE)
+
+
+
+```
+
+
+```{r ext.sel.tab, eval =F}
+
+sels <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2018.csv"), stringsAsFactors = F)
+
+setwd(path.recs)
+ext_st <- selection_table(X = sels, path = path.recs, extended = TRUE, mar = 0.25, parallel = detectCores() - 1, confirm.extended = FALSE)
+
+saveRDS(ext_st, "budgie call extended selection table may-2018.RDS")
+
+format(object.size(ext_st), "auto")
+```
+
+
+## Data description
+```{r data description, eval = T, echo = F}
+
+sels <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2018.csv"), stringsAsFactors = F)
+
+print("Number of calls:")
+nrow(sels)
+
+
+print("Data preview:")
+
+knitr::kable(sels[1:6,-ncol(sels)], row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 10)
+
+
+print("Experiment:")
+unique(sels$Experiment)
+
+
+print("Number of calls per treatment:")
+
+# str(sels$Treatment)
+
+sels$Treatment[is.na(sels$Treatment)] <- "missing"
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Treatment))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Day.Week))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+print("Number of calls per cage:")
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Cage))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per focal group:")
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Focal.Group))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per bird:")
+
+knitr::kable(as.data.frame((as.matrix(table(sels$Bird.Name))))
+, row.names = T, col.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per bird and treatment:")
+
+knitr::kable(((as.matrix(table(sels$Bird.Name, sels$Treatment))))
+, row.names = T, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+print("Number of calls per cage per bird:")
+
+knitr::kable(((as.matrix(table(sels$Bird.Name, sels$Cage))))
+, row.names = T, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+```
+
+```{r acoustic measurements high SNR, eval = F, echo = F}
+
+sels <- read.csv(file.path(path, "High SNR selections and metadata long term budgie calls 2017.csv"))
+
+sels.DTW <- dfDTW(X = sels, wl = 512, length.out = 50, ovlp = 90,bp = c(0.5, 9), parallel = prll, clip.edges = T, path = "/media/twright/DATA/consolidated_files/", img = FALSE)
+
+saveRDS(sels.DTW, file.path(path, "DTW results long term budgie calls 2017.RDS"))
+
+sels.xcorr <- xcorr(X = sels, wl = 512, ovlp = 50, frange = c(0.5, 9), parallel =  prll, path = "/media/twright/DATA/consolidated_files/", dens = 0.8)
+
+ saveRDS(sels.xcorr, file.path(path, "x-corr results long term budgie calls 2017.RDS"))
+
+
+ 
+# 2 dimensions
+fit  <- mds(delta = 1- sels.xcorr, ndim = 2) 
+  
+mds_xcorr1 <- bootmds(fit, sels.xcorr, method.dat = "pearson", nrep = 10)
+
+saveRDS(mds_dtw, "MDS 2 dimensions on DTW distances.RDS")
+
+
+### 3 dimensions
+
+fit  <- mds(delta = dtw_dist, ndim = 3) 
+  
+system.time(mds_dtw3 <- bootmds(fit, dtw_dist, method.dat = "pearson", nrep = 10))
+
+saveRDS(mds_dtw3, "MDS 3 dimensions on DTW distances.RDS")
+
+ 
+ 
+sels.sp <- specan(X = sels, wl = 512, ovlp = 90, bp = c(0.5, 9), parallel = prll, fast = T, path = "/media/twright/DATA/consolidated_files/")
+
+saveRDS(sels.sp, file.path(path, "High SNR SP results long term budgie calls 2017.RDS"))
+
+
+```
+
+```{r acoustic measurements all, eval = F, echo = F}
+
+sels <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2018.csv"), stringsAsFactors = F)
+
+sels.DTW <- dfDTW(X = sels, wl = 300, length.out = 50, ovlp = 90, bp = c(0.5, 9), parallel = prll, clip.edges = T, path = path.recs, img = FALSE)
+
+saveRDS(sels.DTW, file.path(path, "ALL DTW results long term budgie calls 2018.RDS"))
+
+sels.xcorr <- xcorr(X = sels, wl = 512, ovlp = 70, frange = c(0.5, 9), parallel = prll, path = path.recs, dens = 0.8)
+ 
+ saveRDS(sels.xcorr, file.path(path, "ALL x-corr results long term budgie calls 2018.RDS"))
+
+ 
+
+sels.sp <- specan(X = sels, wl = 300, ovlp = 90, bp = c(0.5, 9), parallel = prll, fast = T, path = path.recs)
+
+saveRDS(sels.sp, file.path(path, "ALL SP results long term budgie calls 2018.RDS"))
+
+
+```
+
+```{r raven xcorr, eval = F, echo = F} 
+
+# sels <- read.csv(file.path(path, "Tailored selections long term budgie calls 2017.csv"))
+# 
+# dir.create("/media/twright/DATA/cuts")
+# 
+# # add a rowname column to be able to match cuts and selections
+# sels$rownames <- sprintf("%02d",1:nrow(sels))
+# 
+# # cut files
+# cut_sels(X = sels, mar = 0.01, path = "/media/twright/DATA/consolidated_files/", dest.path = "/media/twright/DATA/cuts", labels = c("rownames", "sound.files", "selec"), pb = T, parallel = detectCores() - 1)
+# 
+# #list cuts
+# l <- list.files(path = "/media/twright/DATA/cuts")
+# 
+# length(l)
+
+```
+
+
+```{r pool measurements together, eval = F, echo = F}
+
+mds_dtw3 <- readRDS("MDS 3 dimensions on DTW distances.RDS")
+
+dist.mat <- range.mat.0.1(selsDTW)
+
+dtw.strss <- pbsapply(3:10, function(x)
+{
+fit  <- mds(delta = dist.mat, ndim = x)
+fit$call[[3]] <-  x
+
+be <- bootmds(fit, dist.mat, method.dat = "euclidean", nrep = 20)
+return(mean(be$stressvec))
+  
+})
+
+dtw.strss <- data.frame(ndim = 3:10, stress = dtw.strss)
+
+write.csv(dtw.strss, file.path(path, "MDS stress DTW High SNR.csv"), row.names = F)
+
+mds.dtw <- bootmds(mds(delta = dist.mat, ndim = 4), dist.mat, method.dat = "euclidean", nrep = 100)
+
+## XCorr stress
+
+sels.xcorr <- readRDS(file.path(path, "High SNR x-corr results long term budgie calls 2017.RDS"))
+
+sels.xcorr <- 1 - sels.xcorr
+
+xcorr.strss <- pbsapply(3:10, function(x)
+{
+fit  <- mds(delta = sels.xcorr, ndim = x)
+fit$call[[3]] <-  x
+
+be <- bootmds(fit, sels.xcorr, method.dat = "euclidean", nrep = 20)
+return(mean(be$stressvec))
+  
+})
+
+xcorr.strss <- data.frame(ndim = 3:10, stress = xcorr.strss)
+
+
+xcorr.strss$method <- "xcorr" 
+
+dtw.strss$method <- "DTW" 
+
+strss <- rbind(dtw.strss, xcorr.strss)
+
+write.csv(strss, file.path(path, "MDS stresses High SNR.csv"), row.names = F)
+
+mds.xcorr <- bootmds(mds(delta = sels.xcorr, ndim = 8), sels.xcorr, method.dat = "euclidean", nrep = 100)
+
+
+sels.sp <- readRDS(file.path(path, "High SNR SP results long term budgie calls 2017.RDS"))
+
+sels <- read.csv(file.path(path, "High SNR selections and metadata long term budgie calls 2017.csv"))
+
+mds.dtw <- mds.dtw$conf
+
+colnames(mds.dtw) <- paste("DTW", colnames(mds.dtw), sep = ".")
+
+mds.xcorr <- mds.xcorr$conf
+
+colnames(mds.xcorr) <- paste("xcorr", colnames(mds.xcorr), sep = ".")
+
+ac.par.sels <- cbind(sels, mds.dtw, sels.sp[, -c(1, 2)], mds.xcorr)
+
+
+write.csv(ac.par.sels, file.path(path, "Acoustic parameters High SNR budgile long term.csv"), row.names = F)
+
+sels.sp2 <- readRDS(file.path(path, "ALL SP results long term budgie calls 2017.RDS"))
+
+sels2 <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2017.csv"), stringsAsFactors = F)
+
+ac.par.sels2 <- cbind(sels2, sels.sp2[, -c(1, 2)])
+
+
+write.csv(ac.par.sels2, file.path(path, "ALL spectral parameters budgie long term.csv"), row.names = F)
+
+
+```
+
+
+## Measurement description
+```{r Measurement description , eval = T, echo = F}
+
+
+sels <- read.csv(file.path(path, "Acoustic parameters High SNR budgile long term.csv"), stringsAsFactors = F)
+
+print("Number of calls highest SNR:")
+nrow(sels)
+
+print("Data preview:")
+
+names(sels)
+
+# for(i in 1:11)
+#   {knitr::kable(sels[1:4,c(1:5) * i], row.names = F, escape = FALSE, format = "html") %>%
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 15)}
+
+print("Number of calls per treatment:")
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Treatment))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+
+print("Number of calls per cage:")
+
+knitr::kable(as.data.frame(t(as.matrix(table(sels$Cage))))
+, row.names = F, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per Bird:")
+
+knitr::kable(as.data.frame((as.matrix(table(sels$Bird.Name))))
+, row.names = T, col.names = "Number of calls", escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per bird and treatment:")
+
+knitr::kable(((as.matrix(table(sels$Bird.Name, sels$Treatment))))
+, row.names = T, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+print("Number of calls per cage per bird:")
+
+knitr::kable(((as.matrix(table(sels$Bird.Name, sels$Cage))))
+, row.names = T, escape = FALSE, format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE, font_size = 16)
+
+```
+
+
+```{r stress plot, eval = T, echo = F}
+
+strss <- read.csv(file.path(path, "MDS stresses High SNR.csv"))
+
+ggplot(data = strss, aes(x = ndim, y = stress, col = method)) + geom_point(size = 3) + geom_line() + geom_hline(yintercept = 0.05, lty = 3, lwd = 1, col = "red2") + labs(x = "Number of eigenvectors", y = "Stress") 
+
+```
+
+
+```{r random forest, eval = T, echo = F}
+
+# asp <- read.csv(file.path(path, "Acoustic parameters High SNR budgile long term.csv"), stringsAsFactors = F)
+
+asp <- read.csv(file.path(path, "ALL spectral parameters budgie long term.csv"), stringsAsFactors = F)
+
+asp$RND1 <- rnorm(n = nrow(asp))
+asp$RND2 <- rnorm(n = nrow(asp))
+asp$RND3 <- rnorm(n = nrow(asp))
+
+#including random
+acu.par.inx <- c(15:ncol(asp))
+
+
+pre.asp.trans <- preProcess(asp[,c(acu.par.inx, grep("SNR", names(asp)))], method = c("BoxCox", "center", "scale"))
+
+asp.trans <- predict(pre.asp.trans, asp[,c(acu.par.inx, grep("SNR", names(asp)))])
+
+# str(asp.trans)
+
+nearZeroVar(asp.trans)
+
+cm <- cor(asp.trans)
+
+# cm
+
+corrplot(cm, method = "ellipse")
+
+# remove highly correlated vars
+high.corr <- findCorrelation(cm, cutoff = .95)
+
+print("Removed colinear parameters (r > 0.95")
+names(asp.trans)[high.corr]
+
+
+```
+
+
+## Random forest
+```{r randomforest 2, eval = F, echo = F}
+
+asp.trans <- asp.trans[,-c(which(names(asp.trans) %in% c(names(asp.trans)[high.corr], "SNR")))]
+
+asp.trans$Call.Type <- asp$Call.Type
+
+
+asp.trans <- asp.trans[, c(ncol(asp.trans), 1:(ncol(asp.trans) - 1))]
+
+split <- createDataPartition(y = asp.trans$Call.Type, p = .75, list = FALSE)
+
+
+trainset <- asp.trans[split, ]
+testset <- asp.trans[-split, ]
+
+rfModeltestRD <- randomForest(x = trainset[,-1], y = trainset$lek.song.type.CONS, xtest = testset[,-1], ytest = testset$lek.song.type.CONS, importance = T, proximity = T, ntree = 10, mtry = 6, keep.forest = T)
+
+
+saveRDS(rfModeltestRD, "/home/m/Dropbox/Documentos_R/Projects/LBH cult-evo 2017/Random forest model on  0.75 test data Real Data.RDS")
+
+```
+
+
+```{r spectros, eval = F, echo = F}
+
+sels <- read.csv(file.path(path, "Selections, snr and metadata long term budgie calls 2017.csv"), stringsAsFactors = F)
+
+# str(sels)
+
+catalog(X = md.sels[1:160,], flim = c(1, 8), nrow = 8, ncol = 10, same.time.scale = T, ovlp = 10, parallel = 1, it = "tiff", path = "/media/twright/DATA/consolidated_files/", pb = T, fast.spec = T, labels = c("sound.files", "Experiment"), tags = c("sound.files", "Experiment"))
+
+
+specreator(X = sels, flim = c(1, 9), ovlp = 50, parallel = detectCores() - 1, it = "tiff", path = "/media/twright/DATA/consolidated_files/", pb = T, fast.spec = F, wl = 300, osci = T)
+
+move.imgs(cut = T, from = "/media/twright/DATA/consolidated_files/", to = "~/Dropbox (NMSU Advanced)/FoxP2 Call Analysis/Call spectros", overwrite = T)
+
+```
+
+################### NOT RUN ###############
+````{r , eval = F, echo = F}
+
+specreator(X = ad, flim = c(1, 6.5), ovlp = 50, parallel = 1, it = "tiff", path = "/media/twright/DATA/consolidated_files/", pb = T, fast.spec = F, wl = 300, osci = T)
+
+write.csv(ad, "/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/autodetec.csv", row.names = F)
+
+ad <- read.csv("/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/autodetec.csv")
+
+
+adF <- ad[!is.na(ad$start),]
+
+adF <- adF[adF$selec == "1-1", ]
+
+adF$selec <- 1
+
+adF <- warbleR::filtersels(X = adF, path = "/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/COPY FemBudg_Calls", img.suffix = "autodetec-1", incl.wav = F)
+
+str(adF)
+str(X)
+
+redoad <- X[!X$sound.files %in% adF$sound.files,]
+str(redoad)
+
+seltailor(X = redoad, wl = 300, flim = c(0.5, 8), ovlp = 90, auto.next = TRUE, pause = 0.1)
+
+# lspec(X = ad, flim = c(0,7), sxrow = 2, rows = 10, ovlp = 70,wl = 400, parallel = 7, it = "tiff", )
+
+st <- read.csv("/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/COPY FemBudg_Calls/seltailor_output.csv")
+
+
+specreator(st, wl = 300, ovlp = 70, flim = c(0.5, 10))
+
+
+
+stF <- warbleR::filtersels(X = st, path = "/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/COPY FemBudg_Calls")
+
+str(st)
+
+selecs <- rbind(adF, stF[, -5])
+
+str(selecs)
+
+write.csv(selecs, "/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/Selections budgie long term 2017.csv", row.names = F)
+
+
+```
+
+
+```{r individual spectros, echo=F, eval = F}
+
+setwd("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/Budgie Call Combined Wav Files")
+
+# setwd("/home/twright/Dropbox/Projects/Budgie calls/Indiv spectros")
+tifs <- list.files(pattern = ".tiff$")
+
+mis <- sel.data[!paste(sel.data$sound.files, sel.data$selec, ".tiff", sep = "-") %in% tifs, ]
+
+mis <- droplevels(mis)
+
+source("/home/twright/Dropbox/Documentos R/Functions/specreator2.R")
+
+specreator2(X = mis, it = "tiff", flim = c(0.5, 9), parallel = 7)
+
+imgs <- list.files(pattern = ".tiff")
+
+file.copy(imgs, to = file.path("/home/twright/Dropbox/Projects/Budgie calls/Indiv spectros", imgs), overwrite =  T)
+
+unlink(imgs)
+
+a <-droplevels(sel.data[sel.data$sound.files == "BRI_11-09-07_Day5.wav",])
+
+specreator2(X = a, it = "tiff", flim = c(0.5, 9), parallel = 7)
+
+
+#now visually inspect selections and delete bad ones 
+```
+
+
+```{r acoustic space change rate, eval = F, echo = F}
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+sels <- imp.raven(path = "/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/Budgie Call Selection Tables")
+
+sels$selec.file <- gsub(".txt.txt", ".txt", sels$selec.file)
+sels$sound.files <- gsub(".selections.txt", ".wav", sels$selec.file)
+
+sels$sound.files <- gsub("Day", "DAY", sels$sound.files)
+sels$sound.files <- gsub("DAY ", "DAY", sels$sound.files)
+sels$sound.files <- gsub(" ", "_", sels$sound.files)
+sels$sound.files <- gsub("__", "_", sels$sound.files)
+sels$sound.files <- gsub("SHA_11-06-03_DAY5.wav", "SHA_11-06-04_DAY5.wav", sels$sound.files)
+sels$sound.files <- gsub("SHA_11-06-04_DAY6.wav", "SHA_11-06-05_DAY6.wav", sels$sound.files)
+
+sels$file.sel <- paste(sels$sound.files,sels$selec, sep = "-")
+
+#add time
+cmds.df <- merge(cmdsBUD.df, sels[,c(4, 7)], by = "file.sel")
+
+cmds.df <- cmds.df[order(cmds.df$indiv, cmds.df$day, cmds.df$start),]
+
+
+cmds.df$indiv.day <- with(cmds.df, paste(indiv, day))
+
+change.res <- pbapply::pblapply(unique(cmds.df$indiv.day), function(x)
+  {
+  Z <- droplevels(cmds.df[cmds.df$indiv.day == x, ])
+  
+    if(nrow(Z) > 1)
+    {
+    #distance per step
+      dist1step <- sapply(1:(nrow(Z) - 1),function(z)
+   {
+   dist(Z[c(z, z + 1), grep("mds", names(Z))])
+   
+   })
+  #area per step
+    if(nrow(Z) > 3) {
+      area1step <- parallel::mclapply(3:(nrow(Z)-1), mc.cores = 5, function(z)
+   {
+   area1 <- as.numeric(earth.poly(Z[1:z,  grep("mds", names(Z))])$area) 
+  area2 <- as.numeric(earth.poly(Z[1:(z+1),  grep("mds", names(Z))])$area) 
+   return(data.frame(abs.area.chng = c(area2 - area1), rel.area.chng = c((area2 - area1)/area1)))
+  })
+
+  area1step[[length(area1step) + 1]] <- data.frame(abs.area.chng = rep(NA, 2), rel.area.chng = rep(NA, 2))
+
+  area1step <- do.call(rbind, area1step)
+  
+  data.frame(indiv = Z$indiv[1], day = Z$day[1], dist = dist1step, abs.area.change =  area1step$abs.area.chng, rel.area.change = area1step$rel.area.chn)} else
+    
+  data.frame(indiv = Z$indiv[1], day = Z$day[1], dist = dist1step, abs.area.change =  NA, rel.area.change = NA)
+    
+   } else data.frame(indiv = Z$indiv[1], day = Z$day[1], dist = NA, abs.area.change =  NA, rel.area.change = NA)
+   
+}
+)
+
+
+change.res <- do.call(rbind, change.res)
+
+# saveRDS(change.res,"/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+
+# saveRDS(change.res,"/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+# str(change.res)
+# 
+# 
+# plot(log(change.res$dist), log(change.res$abs.area.change))
+# plot(log(change.res$dist), log(change.res$rel.area.change))
+
+# 
+# shapiro.test(log(change.res$dist))
+
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+change.res$indiv <- toupper(change.res$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(change.res$indiv)[!unique(change.res$indiv) %in% unique(analysisplan$Bird.ID)]
+
+change.res$day <- gsub("DAY", "", change.res$day)
+
+change.res$social.group <- NA
+change.res$experiment <- NA
+change.res$treatment <- NA
+change.res$sex <- NA
+
+for(x in 1:nrow(change.res))
+  {
+  change.res$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == change.res$indiv[x]]
+    change.res$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == change.res$indiv[x]]
+  
+  change.res$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == change.res$indiv[x]]
+change.res$treatment[x] <- if(as.numeric(change.res$day[x])<=5) "Pre" else "Post"  
+}
+
+str(change.res)
+
+change.res$indiv <- as.factor(change.res$indiv)
+change.res$day <- as.factor(change.res$day)
+change.res$social.group <- as.factor(change.res$social.group)
+change.res$experiment <- as.factor(change.res$experiment)
+change.res$treatment <- as.factor(change.res$treatment)
+change.res$sex <- as.factor(change.res$sex)
+change.res <- change.res[!is.na(change.res$dist), ]
+
+
+saveRDS(change.res,"/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+
+#create subset with 25 calls
+change.res <- change.res[!is.na(change.res$dist), ]
+
+change.res$indiv.day <- with(change.res, paste(indiv, day))
+ 
+#leave only 25 calls 
+
+cr25 <- lapply(unique(change.res$indiv.day), function(x)
+{
+Y <- change.res[change.res$indiv.day == x, ]
+if(nrow(Y) < 25) return(NA) else return(Y[1:25,])
+}
+)
+cr25 <- cr25[sapply(cr25, is.data.frame)]
+cr25
+
+change.res25 <- do.call(rbind, cr25)
+
+# str(change.res25)
+
+
+#leave only the ones with 2 day difference between pre and post (remove all the rest)
+cr25 <- lapply(unique(change.res25$indiv), function(x)
+  {
+  Y <- change.res25[change.res25$indiv == x,]
+  dyss <- as.numeric(as.character(unique(Y$day)))
+  
+   if(any(length(unique(Y$treatment)) < 2, length(dyss) < 2)) return(NA)  else
+{     
+    Z <- Y[Y$day %in% c(dyss[length(dyss)], dyss[length(dyss)] - 2),]
+        return(Z) 
+    }
+})
+
+cr25 <- cr25[sapply(cr25, is.data.frame)]
+change.res25 <-do.call(rbind, cr25)
+
+change.res25 <- change.res25[change.res25$indiv %in% names(table(change.res25$indiv))[table(change.res25$indiv)==50],]
+change.res25 <-  droplevels(change.res25)
+
+
+saveRDS(change.res25,"/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space 25 calls.RDS")
+
+```
+
+
+```{r regresion models on mean distance change, eval = F, echo = F}
+
+change.res <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+
+
+
+# change.res <- change.res[!is.na(change.res$correc.area), ]
+
+str(change.res)
+
+#linear mixed models
+
+# change.res[,sapply(change.res, is.numeric)] <- log(change.res[,sapply(change.res, is.numeric)]+1)
+
+with(change.res, boxplot(dist~treatment + social.group, xlab = "Period/Environment", ylab = "Acoustic distance"))
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = change.res,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = change.res,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~dist","dist~",Modnames)
+
+Modnames <- gsub("dist", "Distance", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r regresion models on mean distance change 25 calls, eval = F, echo = F}
+
+change.res25 <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space 25 calls.RDS")
+
+# str(change.res25)
+
+#linear mixed models
+
+# change.res25[,sapply(change.res25, is.numeric)] <- log(change.res25[,sapply(change.res25, is.numeric)]+1)
+
+with(change.res25, boxplot(dist~treatment + social.group, xlab = "Period/Environment", ylab = "Acoustic distance"))
+
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = change.res25, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = change.res25, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = change.res25,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = change.res25,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~dist","dist~",Modnames)
+
+Modnames <- gsub("dist", "Distance", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r regresion models on relative acoustic change, eval = F, echo = F}
+
+change.res <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+
+
+ag.change.res <- aggregate(change.res[,grep("rel.area", names(change.res))], by = list(change.res$indiv, change.res$day, change.res$treatment, change.res$experiment, change.res$social.group, change.res$sex), mean, na.rm = T)
+
+names(ag.change.res) <- c("indiv", "day", "treatment", "experiment", "social.group", "sex", "rel.chng")
+
+#linear mixed models
+
+# change.res[,sapply(change.res, is.numeric)] <- log(change.res[,sapply(change.res, is.numeric)]+1)
+
+with(ag.change.res, boxplot(rel.chng ~ treatment + social.group, xlab = "Period/Environment", ylab = "Relative acoustic space change"))
+
+# with(change.res, boxplot(dist~treatment + experiment))
+
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~rel.chng","rel.chng~",Modnames)
+
+Modnames <- gsub("rel.chng", "Relative space change", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r regresion models on relative acoustic change 25 calls, eval = F, echo = F}
+
+change.res <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space 25 calls.RDS")
+
+
+ag.change.res <- aggregate(change.res[,grep("rel.area", names(change.res))], by = list(change.res$indiv, change.res$day, change.res$treatment, change.res$experiment, change.res$social.group, change.res$sex), mean, na.rm = T)
+
+names(ag.change.res) <- c("indiv", "day", "treatment", "experiment", "social.group", "sex", "rel.chng")
+
+#linear mixed models
+
+# change.res[,sapply(change.res, is.numeric)] <- log(change.res[,sapply(change.res, is.numeric)]+1)
+
+with(ag.change.res, boxplot(rel.chng ~ treatment + social.group, xlab = "Period/Environment", ylab = "Relative acoustic space change"))
+
+# with(change.res, boxplot(dist~treatment + experiment))
+
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~rel.chng","rel.chng~",Modnames)
+
+Modnames <- gsub("rel.chng", "Relative space change", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r  regresion models on absolute acoustic change, eval = F, echo = F}
+#regresion models on absolute space change on all data
+
+change.res <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space.RDS")
+
+
+ag.change.res <- aggregate(change.res[,grep("abs.area", names(change.res))], by = list(change.res$indiv, change.res$day, change.res$treatment, change.res$experiment, change.res$social.group, change.res$sex), mean, na.rm = T)
+
+names(ag.change.res) <- c("indiv", "day", "treatment", "experiment", "social.group", "sex", "rel.chng")
+
+#linear mixed models
+
+# change.res[,sapply(change.res, is.numeric)] <- log(change.res[,sapply(change.res, is.numeric)]+1)
+
+with(ag.change.res, boxplot(rel.chng ~ treatment + social.group, xlab = "Period/Environment", ylab = "Absolute acoustic space change"))
+
+# with(change.res, boxplot(dist~treatment + experiment))
+
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~rel.chng","rel.chng~",Modnames)
+
+Modnames <- gsub("rel.chng", "Absolute space change", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r  regresion models on absolute acoustic change 25 calls, eval = F, echo = F}
+#regresion models on absolute space change on 25 calls data
+
+change.res <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/average change of acoustic space 25 calls.RDS")
+
+
+ag.change.res <- aggregate(change.res[,grep("abs.area", names(change.res))], by = list(change.res$indiv, change.res$day, change.res$treatment, change.res$experiment, change.res$social.group, change.res$sex), mean, na.rm = T)
+
+names(ag.change.res) <- c("indiv", "day", "treatment", "experiment", "social.group", "sex", "rel.chng")
+
+#linear mixed models
+
+# change.res[,sapply(change.res, is.numeric)] <- log(change.res[,sapply(change.res, is.numeric)]+1)
+
+with(ag.change.res, boxplot(rel.chng ~ treatment + social.group, xlab = "Period/Environment", ylab = "Absolute acoustic space change"))
+
+# with(change.res, boxplot(dist~treatment + experiment))
+
+
+Cand.models <- list( )
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ 1 + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng ~ social.group + treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(rel.chng~ social.group*treatment + (1|indiv) + (1|experiment) + (1|sex), data = ag.change.res,  REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+Modnames<-gsub("~rel.chng","rel.chng~",Modnames)
+
+Modnames <- gsub("rel.chng", "Absolute space change", Modnames)
+Modnames <- gsub("social.group", "Social environment", Modnames)
+Modnames <- gsub("treatment", "Period", Modnames)
+Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+
+# treatment effect
+es <- list()
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Stable", "Stable")))
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Pre"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Post", "Post"), social.group = c("Stable", "Novel")))
+
+es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor="Post",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+results <- do.call(rbind, es)
+
+sig <- sign(results$lowerCI * results$upperCI)
+sig[sig == -1] <- "No"
+sig[sig == 1] <- "sig"
+
+results$Significance <- sig
+
+rownames(results) <- 1:nrow(results)
+
+results
+
+grid.table(cs$table)
+
+grid.table(results)
+
+```
+
+
+```{r regression with matrices all data, eval = F, echo = F}
+
+#regression with matrices all data
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+# head(cmdsBUD.df)
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+
+
+
+subsels <- selsDTW
+ subcmds <- cmdsBUD.df
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+  
+sex.mat <- birdID.mat <- treat.mat <- exp.mat <- socialg.mat <- subsels
+
+rownames(birdID.mat) <- colnames(birdID.mat) <- subcmds$indiv
+
+rownames(treat.mat) <- colnames(treat.mat) <- subcmds$treatment
+
+rownames(exp.mat) <- colnames(exp.mat) <- subcmds$experiment
+
+rownames(socialg.mat) <- colnames(socialg.mat) <- subcmds$social.group
+
+rownames(sex.mat) <- colnames(sex.mat) <- subcmds$sex
+
+
+birdID.mat <- bin.mat(birdID.mat)
+treat.mat <- bin.mat(treat.mat)
+sex.mat <- bin.mat(sex.mat)
+socialg.mat <- bin.mat(socialg.mat)
+exp.mat <- bin.mat(exp.mat)
+
+
+
+# mantel.rtest(as.dist(subsels), as.dist(treat.mat), nrepet = 100)
+# 
+# vegan::mantel.partial(as.dist(subsels), as.dist(treat.mat), as.dist(birdID.mat))
+# vegan::mantel.partial(as.dist(subsels), as.dist(exp.mat), as.dist(birdID.mat))
+# 
+
+all.mrm.res <- MRM(as.dist(subsels) ~ as.dist(treat.mat) + as.dist(birdID.mat) + as.dist(socialg.mat)  + as.dist(exp.mat)+ as.dist(sex.mat))
+
+all.mrm.res
+# 
+# ##on M-M data
+# MMbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsels <- subsels[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMtreat.mat <- treat.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# 
+# MMmrm.res <- MRM(as.dist(MMsels) ~ as.dist(MMtreat.mat) + as.dist(MMbirdID.mat) + as.dist(MMsocialg.mat))
+# MMmrm.res
+# 
+# 
+# ##on M-F data
+# MFbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsels <- subsels[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFtreat.mat <- treat.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# 
+# MFmrm.res <- MRM(as.dist(MFsels) ~ as.dist(MFtreat.mat) + as.dist(MFbirdID.mat) + as.dist(MFsocialg.mat))
+# MFmrm.res
+# 
+# 
+# ##on F-F data
+# FFbirdID.mat <- birdID.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsels <- subsels[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFtreat.mat <- treat.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsocialg.mat <- socialg.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# 
+# FFmrm.res <- MRM(as.dist(FFsels) ~ as.dist(FFtreat.mat) + as.dist(FFbirdID.mat) + as.dist(FFsocialg.mat))
+# FFmrm.res
+
+
+##on Stable data
+STAbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsels <- subsels[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAtreat.mat <- treat.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAexp.mat <- exp.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsex.mat <- sex.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+
+STAmrm.res <- MRM(as.dist(STAsels) ~ as.dist(STAtreat.mat) + as.dist(STAbirdID.mat) + as.dist(STAexp.mat)+ as.dist(STAsex.mat))
+
+STAmrm.res
+
+##on NOVel data
+NOVbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsels <- subsels[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVtreat.mat <- treat.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVexp.mat <- exp.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsex.mat <- sex.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+
+NOVmrm.res <- MRM(as.dist(NOVsels) ~ as.dist(NOVtreat.mat) + as.dist(NOVbirdID.mat) + as.dist(NOVexp.mat)+ as.dist(NOVsex.mat))
+NOVmrm.res
+
+```
+
+
+```{r regression with matrices fisrt 25 calls, eval = F, echo = F}
+
+#regression with matrices first 25 calls (only bird/days with at least 25 calls)
+
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+# head(cmdsBUD.df)
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+
+
+#subset to only the ones with at least 25 per treatment (and no more than 25)
+cutoff <- 25
+
+subdf <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x,]
+  res <- lapply(unique(Y$day), function(y)
+    {
+    Z <- Y[Y$day == y,]
+    if(nrow(Z) > cutoff)
+      return(Z[1:cutoff, ]) else return(NA)
+    })
+ res <- res[sapply(res, is.data.frame)]
+ if(length(res) == 0) return(NA) else
+{ if(length(res) > 1) return(do.call(rbind, res)) else return(res[[1]])
+  }
+ })
+
+ subdf <- subdf[sapply(subdf, is.data.frame)]
+subcmds <- droplevels(do.call(rbind, subdf))
+
+#check what difference in days between pre and post is more common
+# cmdif <- sapply(unique(subcmds$indiv), function(x)
+# {
+#   Y <- subcmds[subcmds$indiv == x,]
+#     dys <- as.numeric(as.character(unique(Y$day)))
+# 
+#   if(length(unique(Y$treatment)) < 2) return(NA) else
+# {  
+#   if(length(dys) < 2) return(NA) else 
+#   {
+#   }
+#   return(paste(dys[length(dys)] - dys[-length(dys)], collapse = "-"))
+#   }  
+# }
+#   )
+
+# data.frame(unique(subcmds$indiv), cmdif)
+
+#leave only the ones with 2 day difference between pre and post (remove all the rest)
+subdf2 <- lapply(unique(subcmds$indiv), function(x)
+  {
+  Y <- subcmds[subcmds$indiv == x,]
+   dyss <- as.numeric(as.character(unique(Y$day)))
+  
+   if(any(length(unique(Y$treatment)) < 2, length(dyss) < 2)) return(NA)  else
+{     
+    Z <- Y[Y$day %in% c(dyss[length(dyss)], dyss[length(dyss)] - 2),]
+        return(Z) 
+    }
+})
+
+subdf2 <- subdf2[sapply(subdf2, is.data.frame)]
+subcmds <- droplevels(do.call(rbind, subdf2))
+subcmds <- subcmds[subcmds$indiv %in% names(table(subcmds$indiv))[table(subcmds$indiv)==50],]
+
+
+
+subsels <- selsDTW[rownames(selsDTW) %in% subcmds$file.sel, colnames(selsDTW) %in% subcmds$file.sel]
+
+
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+  
+sex.mat <- birdID.mat <- treat.mat <- exp.mat <- socialg.mat <- subsels
+
+rownames(birdID.mat) <- colnames(birdID.mat) <- subcmds$indiv
+
+rownames(treat.mat) <- colnames(treat.mat) <- subcmds$treatment
+
+rownames(exp.mat) <- colnames(exp.mat) <- subcmds$experiment
+
+rownames(socialg.mat) <- colnames(socialg.mat) <- subcmds$social.group
+
+rownames(sex.mat) <- colnames(sex.mat) <- subcmds$sex
+
+
+birdID.mat <- bin.mat(birdID.mat)
+treat.mat <- bin.mat(treat.mat)
+sex.mat <- bin.mat(sex.mat)
+socialg.mat <- bin.mat(socialg.mat)
+exp.mat <- bin.mat(exp.mat)
+
+
+
+# mantel.rtest(as.dist(subsels), as.dist(treat.mat), nrepet = 100)
+# 
+# vegan::mantel.partial(as.dist(subsels), as.dist(treat.mat), as.dist(birdID.mat))
+# vegan::mantel.partial(as.dist(subsels), as.dist(exp.mat), as.dist(birdID.mat))
+# 
+# mrm.res <- MRM(as.dist(subsels) ~ as.dist(treat.mat) + as.dist(birdID.mat))
+# 
+# mrm.res <- MRM(as.dist(subsels) ~ as.dist(treat.mat * birdID.mat* exp.mat))
+library(ecodist)
+
+all.mrm.res25 <- MRM(as.dist(subsels) ~ as.dist(treat.mat) + as.dist(birdID.mat) + as.dist(socialg.mat)  + as.dist(exp.mat)+ as.dist(sex.mat))
+
+MRM(as.dist(subsels) ~ as.dist(socialg.mat) )
+
+
+all.mrm.res25
+
+
+cnames <- rownames(all.mrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+
+tab <- as.data.frame(all.mrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+# dev.off()
+
+
+# ##on M-M data
+# MMbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsels <- subsels[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMtreat.mat <- treat.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# 
+# MMmrm.res <- MRM(as.dist(MMsels) ~ as.dist(MMtreat.mat) + as.dist(MMbirdID.mat) + as.dist(MMsocialg.mat))
+# MMmrm.res
+# 
+# 
+# ##on M-F data
+# MFbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsels <- subsels[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFtreat.mat <- treat.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# 
+# MFmrm.res <- MRM(as.dist(MFsels) ~ as.dist(MFtreat.mat) + as.dist(MFbirdID.mat) + as.dist(MFsocialg.mat))
+# MFmrm.res
+# 
+# 
+# ##on F-F data
+# FFbirdID.mat <- birdID.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsels <- subsels[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFtreat.mat <- treat.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsocialg.mat <- socialg.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# 
+# FFmrm.res <- MRM(as.dist(FFsels) ~ as.dist(FFtreat.mat) + as.dist(FFbirdID.mat) + as.dist(FFsocialg.mat))
+# FFmrm.res
+
+
+##on Stable data
+STAbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsels <- subsels[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAtreat.mat <- treat.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAexp.mat <- exp.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsex.mat <- sex.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+
+STAmrm.res25 <- MRM(as.dist(STAsels) ~ as.dist(STAtreat.mat) + as.dist(STAbirdID.mat) + as.dist(STAexp.mat)+ as.dist(STAsex.mat))
+STAmrm.res25
+
+
+
+cnames <- rownames(STAmrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+
+tab <- as.data.frame(STAmrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+
+
+
+
+
+##on NOVel data
+NOVbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsels <- subsels[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVtreat.mat <- treat.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVexp.mat <- exp.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsex.mat <- sex.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+
+
+NOVmrm.res25 <- MRM(as.dist(NOVsels) ~ as.dist(NOVtreat.mat) + as.dist(NOVbirdID.mat) + as.dist(NOVexp.mat))
+NOVmrm.res25
+
+
+cnames <- rownames(NOVmrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+
+tab <- as.data.frame(NOVmrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+
+
+
+
+
+#all results together
+# all.mrm.res
+all.mrm.res25
+
+# STAmrm.res
+STAmrm.res25
+
+# NOVmrm.res
+NOVmrm.res25
+
+length(unique(colnames(NOVbirdID.mat)))
+length(unique(colnames(STAbirdID.mat)))
+unique(colnames(treat.mat))
+unique(colnames(exp.mat))
+unique(colnames(socialg.mat))
+
+
+#randomization for testing test performance 
+
+SFbirdID.mat <- SFtreat.mat <- SFexp.mat <- SFsocialg.mat <- subsels
+
+
+shuf.bin.mat <- function(mat, names) {
+rownames(mat) <- colnames(mat) <- sample(names)
+return(as.dist(bin.mat(mat)))
+}
+
+
+# resl <- parallel::mclapply(1:1000, mc.cores = 5, function(x){
+# res <- MRM(as.dist(subsels) ~ shuf.bin.mat(SFtreat.mat, subcmds$treatment) +  shuf.bin.mat(SFbirdID.mat, subcmds$indiv) + shuf.bin.mat(SFsocialg.mat, subcmds$social.group)  + shuf.bin.mat(SFexp.mat, subcmds$experiment))
+# return(as.matrix(res$coef))
+# })
+# 
+# m <- do.call(rbind, resl)
+# tapply(m[,2], INDEX = rownames(m), function(x) length(x[x<0.05])/length(x))
+
+
+```
+
+
+```{r mean sd plot, eval = F, echo = F}
+
+#mean sd plots (look bad)
+
+matfact <- function(X) c(sapply(1:nrow(X), function(x)
+  {
+  paste(colnames(X)[x], rownames(X))
+  }))
+
+matfact(treat.mat)
+
+
+df <- data.frame("acoustic.dissimilarity" = c(selsDTW), "Social.environment" = matfact(socialg.mat), "Period" = matfact(treat.mat), "Social.group" = matfact(exp.mat))
+
+head(df)
+agdf <- aggregate(df$acoustic.dissimilarity, by = list(df$Social.environment, df$Period, df$Social.group), mean)
+
+names(agdf) <- c("Social.environment", "Period", "Social.group", "Acoustic.dissimilarity")
+
+se <- function(x) sd(x)/sqrt(length(x))
+
+agdf$se <- aggregate(df$acoustic.dissimilarity, by = list(df$Social.environment, df$Period, df$Social.group), se)[,4]
+
+agdf$sd <- aggregate(df$acoustic.dissimilarity, by = list(df$Social.environment, df$Period, df$Social.group), sd)[,4]
+
+agdf <- agdf[agdf$Social.environment %in% c("Novel Novel", "Stable Stable"),]
+agdf <- agdf[agdf$Period %in% c("Pre Pre", "Post Post"),]
+agdf <- agdf[agdf$Social.group %in% c("M-M M-M", "M-F M-F", "F-F F-F"),]
+
+mattab <-agdf
+
+# ~ as.dist(treat.mat) + as.dist(birdID.mat) + as.dist(socialg.mat)  + as.dist(exp.mat)+ as.dist(sex.mat))
+
+# 
+levels(mattab$Period)[levels(mattab$Period)=="Pre Pre"] <- "Pre"
+levels(mattab$Period)[levels(mattab$Period)=="Post Post"] <- "Post"
+
+levels(mattab$Social.group)[levels(mattab$Social.group)=="M-M M-M"] <- "M-M"
+levels(mattab$Social.group)[levels(mattab$Social.group)=="M-F M-F"] <- "M-F"
+levels(mattab$Social.group)[levels(mattab$Social.group)=="F-F F-F"] <- "F-F"
+
+# 
+# #change order of factors
+mattab$Period <- factor(mattab$Period, c("Pre", "Post"))
+# 
+# mattab$Group <- factor(mattab$Group, c("Same", "Different"))
+# 
+# mattab[order(mattab$param,mattab$level),]
+# 
+# mattab<-droplevels(mattab[mattab$level!="song neighborhood",])
+
+library(ggplot2)
+
+
+# tiff(filename = "/home/m/Dropbox/Manuscripts/LBH visual and vocal dialects/figures/mutipannel ggplot dissimilarity fig.tiff",res=300, width = 7000/2.7, height = 5000/5)
+
+pd <- position_dodge(0.2)
+
+ggplot(mattab, aes(x = Period, y = Acoustic.dissimilarity, colour = Social.environment, group=Social.environment))+ 
+  geom_errorbar(aes(ymin=Acoustic.dissimilarity-se*20, ymax=Acoustic.dissimilarity+se*20), width=.1, position=pd) +
+geom_line(position=pd) +  
+  xlab("Social environment") + 
+  ylab("Acoustic dissimilarity") +
+geom_point(position=pd, size=3, shape=21, fill="white")+
+  theme_bw() + geom_text(x=1.5,y=0.5,label="*",size=10) + 
+  theme(strip.text.x = element_text(size = 8.3))+
+        facet_wrap(~ Social.group, scales = "free",nrow = 1) +
+scale_colour_hue(l=40) 
+
+
+```
+
+
+```{r pre post scatter plots acoustic space, eval = F, echo = F}
+
+str(subcmds)
+
+#select birds with pre and post songs
+tab <- table(subcmds$indiv, subcmds$treatment)
+
+
+prepost <- subcmds[subcmds$indiv %in% row.names(tab)[as.logical(apply(tab, 1, function(x) if(any(x == 0)) FALSE else TRUE))], ]
+
+str(prepost)
+prepost$period.day <- paste(toupper(prepost$treatment), paste("day",prepost$day))
+
+lapply(unique(prepost$indiv), function(x) {
+  Y <- prepost[prepost$indiv == x,]
+
+  ggplot(Y, aes(x = mds.1, y = mds.2, color = period.day)) +
+    geom_point(shape = 20, size = 7) + xlab("MDS.1") + ylab("MDS.2") + ggtitle(paste(x, Y$social.group[1], Y$experiment[1])) + scale_colour_discrete(name="Period")
+
+  })
+
+
+
+#complete acoustc space for 25 calls subset
+ ggplot(prepost, aes(x = mds.1, y = mds.2, shape = treatment, color = indiv)) +
+    geom_point(size = 4) + xlab("MDS.1") + ylab("MDS.2") + ggtitle("Overall acoustic space for '25 calls' data set") + scale_shape_discrete(name="Period") + scale_colour_discrete(name="Bird")
+
+#labeled by period
+ ggplot(cmdsBUD.df , aes(x = mds.1, y = mds.2, shape = treatment, color = indiv)) +
+    geom_point(size = 4) + xlab("MDS.1") + ylab("MDS.2") + ggtitle("Overall acoustic space") + scale_colour_discrete(name="Bird") + scale_shape_discrete(name = "Period") + guides(col=guide_legend(ncol=2))
+
+#labeled by social environment
+ ggplot(cmdsBUD.df , aes(x = mds.1, y = mds.2, shape = social.group, color = indiv)) +
+    geom_point(size = 4) + xlab("MDS.1") + ylab("MDS.2") + ggtitle("Overall acoustic space") + scale_colour_discrete(name="Bird") + scale_shape_discrete(name = "Social environment") + guides(col=guide_legend(ncol=2))
+
+
+```
+
+
+```{r regression with matrices all data with PAIR as predictor, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$pair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+# head(cmdsBUD.df)
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+cmdsBUD.df$pair <- as.factor(cmdsBUD.df$pair)
+
+
+
+subsels <- selsDTW
+ subcmds <- cmdsBUD.df
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+  
+pair.mat <- sex.mat <- birdID.mat <- treat.mat <- exp.mat <- socialg.mat <- subsels
+
+rownames(birdID.mat) <- colnames(birdID.mat) <- subcmds$indiv
+
+rownames(treat.mat) <- colnames(treat.mat) <- subcmds$treatment
+
+rownames(exp.mat) <- colnames(exp.mat) <- subcmds$experiment
+
+rownames(socialg.mat) <- colnames(socialg.mat) <- subcmds$social.group
+
+rownames(sex.mat) <- colnames(sex.mat) <- subcmds$sex
+
+rownames(pair.mat) <- colnames(pair.mat) <- subcmds$pair
+
+
+birdID.mat <- bin.mat(birdID.mat)
+treat.mat <- bin.mat(treat.mat)
+sex.mat <- bin.mat(sex.mat)
+socialg.mat <- bin.mat(socialg.mat)
+exp.mat <- bin.mat(exp.mat)
+pair.mat <- bin.mat(pair.mat)
+
+
+# mantel.rtest(as.dist(subsels), as.dist(treat.mat), nrepet = 100)
+# 
+# vegan::mantel.partial(as.dist(subsels), as.dist(treat.mat), as.dist(birdID.mat))
+# vegan::mantel.partial(as.dist(subsels), as.dist(exp.mat), as.dist(birdID.mat))
+# 
+
+all.mrm.res <- ecodist::MRM(as.dist(subsels) ~ as.dist(treat.mat) + as.dist(pair.mat) + as.dist(birdID.mat) + as.dist(socialg.mat)  + as.dist(exp.mat)+ as.dist(sex.mat))
+
+all.mrm.res
+# 
+# ##on M-M data
+# MMbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsels <- subsels[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMtreat.mat <- treat.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# 
+# MMmrm.res <- MRM(as.dist(MMsels) ~ as.dist(MMtreat.mat) + as.dist(MMbirdID.mat) + as.dist(MMsocialg.mat))
+# MMmrm.res
+# 
+# 
+# ##on M-F data
+# MFbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsels <- subsels[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFtreat.mat <- treat.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# 
+# MFmrm.res <- MRM(as.dist(MFsels) ~ as.dist(MFtreat.mat) + as.dist(MFbirdID.mat) + as.dist(MFsocialg.mat))
+# MFmrm.res
+# 
+# 
+# ##on F-F data
+# FFbirdID.mat <- birdID.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsels <- subsels[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFtreat.mat <- treat.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsocialg.mat <- socialg.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# 
+# FFmrm.res <- MRM(as.dist(FFsels) ~ as.dist(FFtreat.mat) + as.dist(FFbirdID.mat) + as.dist(FFsocialg.mat))
+# FFmrm.res
+
+
+##on Stable data
+STAbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsels <- subsels[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAtreat.mat <- treat.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAexp.mat <- exp.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsex.mat <- sex.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STApair.mat <- pair.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+
+STAmrm.res <- ecodist::MRM(as.dist(STAsels) ~  as.dist(STApair.mat) +  as.dist(STAtreat.mat) + as.dist(STAbirdID.mat) + as.dist(STAexp.mat)+ as.dist(STAsex.mat))
+
+STAmrm.res <- ecodist::MRM(as.dist(STAsels) ~  as.dist(STApair.mat) +  as.dist(STAtreat.mat))
+
+STAmrm.res
+
+##on NOVel data
+NOVbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsels <- subsels[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVtreat.mat <- treat.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVexp.mat <- exp.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsex.mat <- sex.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVpair.mat <- pair.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+
+NOVmrm.res <- ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat) + as.dist(NOVbirdID.mat) + as.dist(NOVexp.mat)+ as.dist(NOVsex.mat))
+
+NOVmrm.res <- ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat))
+
+NOVmrm.res
+
+
+plot(table(cmdsBUD.df$pair, cmdsBUD.df$treatment), main = "Sample sizes")
+
+t.test(x = table(cmdsBUD.df$pair, cmdsBUD.df$treatment)[,1], y = table(cmdsBUD.df$pair, cmdsBUD.df$treatment)[,2], paired = T)
+
+plot(table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Novel"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Novel"]), main = "Sample sizes Novel groups")
+
+t.test(x = table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Novel"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Novel"])[,1], y = table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Novel"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Novel"])[,2], paired = T)
+
+
+plot(table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Stable"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Stable"]), main = "Sample sizes Stable groups")
+
+
+t.test(x = table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Stable"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Stable"])[,1], y = table(cmdsBUD.df$pair[cmdsBUD.df$social.group == "Stable"], cmdsBUD.df$treatment[cmdsBUD.df$social.group == "Stable"])[,2], paired = T)
+
+
+
+```
+
+
+```{r regression with matrices fisrt 25 calls 2, eval = F, echo = F}
+#regression with matrices first 25 calls with PAIR as predictors
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$pair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+
+}
+
+# head(cmdsBUD.df)
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+
+
+#subset to only the ones with at least 25 per treatment (and no more than 25)
+cutoff <- 25
+
+subdf <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x,]
+  res <- lapply(unique(Y$day), function(y)
+    {
+    Z <- Y[Y$day == y,]
+    if(nrow(Z) > cutoff)
+      return(Z[(nrow(Z)-25+1):nrow(Z), ]) else return(NA)
+    })
+ res <- res[sapply(res, is.data.frame)]
+ if(length(res) == 0) return(NA) else
+{ if(length(res) > 1) return(do.call(rbind, res)) else return(res[[1]])
+  }
+ })
+
+ subdf <- subdf[sapply(subdf, is.data.frame)]
+subcmds <- droplevels(do.call(rbind, subdf))
+
+#check what difference in days between pre and post is more common
+# cmdif <- sapply(unique(subcmds$indiv), function(x)
+# {
+#   Y <- subcmds[subcmds$indiv == x,]
+#     dys <- as.numeric(as.character(unique(Y$day)))
+# 
+#   if(length(unique(Y$treatment)) < 2) return(NA) else
+# {  
+#   if(length(dys) < 2) return(NA) else 
+#   {
+#   }
+#   return(paste(dys[length(dys)] - dys[-length(dys)], collapse = "-"))
+#   }  
+# }
+#   )
+
+# data.frame(unique(subcmds$indiv), cmdif)
+
+#leave only the ones with 2 day difference between pre and post (remove all the rest)
+subdf2 <- lapply(unique(subcmds$indiv), function(x)
+  {
+  Y <- subcmds[subcmds$indiv == x,]
+   dyss <- as.numeric(as.character(unique(Y$day)))
+  
+   if(any(length(unique(Y$treatment)) < 2, length(dyss) < 2)) return(NA)  else
+{     
+    Z <- Y[Y$day %in% c(dyss[length(dyss)], dyss[length(dyss)] - 2),]
+        return(Z) 
+    }
+})
+
+subdf2 <- subdf2[sapply(subdf2, is.data.frame)]
+subcmds <- droplevels(do.call(rbind, subdf2))
+subcmds <- subcmds[subcmds$indiv %in% names(table(subcmds$indiv))[table(subcmds$indiv)==50],]
+
+
+
+subsels <- selsDTW[rownames(selsDTW) %in% subcmds$file.sel, colnames(selsDTW) %in% subcmds$file.sel]
+
+
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+  
+pair.mat <- sex.mat <- birdID.mat <- treat.mat <- exp.mat <- socialg.mat <- subsels
+
+rownames(birdID.mat) <- colnames(birdID.mat) <- subcmds$indiv
+
+rownames(treat.mat) <- colnames(treat.mat) <- subcmds$treatment
+
+rownames(exp.mat) <- colnames(exp.mat) <- subcmds$experiment
+
+rownames(socialg.mat) <- colnames(socialg.mat) <- subcmds$social.group
+
+rownames(sex.mat) <- colnames(sex.mat) <- subcmds$sex
+
+rownames(pair.mat) <- colnames(pair.mat) <- subcmds$pair
+
+
+birdID.mat <- bin.mat(birdID.mat)
+treat.mat <- bin.mat(treat.mat)
+sex.mat <- bin.mat(sex.mat)
+socialg.mat <- bin.mat(socialg.mat)
+exp.mat <- bin.mat(exp.mat)
+pair.mat <- bin.mat(pair.mat)
+
+
+
+# mantel.rtest(as.dist(subsels), as.dist(treat.mat), nrepet = 100)
+# 
+# vegan::mantel.partial(as.dist(subsels), as.dist(treat.mat), as.dist(birdID.mat))
+# vegan::mantel.partial(as.dist(subsels), as.dist(exp.mat), as.dist(birdID.mat))
+# 
+# mrm.res <- MRM(as.dist(subsels) ~ as.dist(treat.mat) + as.dist(birdID.mat))
+# 
+# mrm.res <- MRM(as.dist(subsels) ~ as.dist(treat.mat * birdID.mat* exp.mat))
+# library(ecodist)
+
+all.mrm.res25 <- ecodist::MRM(as.dist(subsels) ~ as.dist(pair.mat) + as.dist(treat.mat) + as.dist(birdID.mat) + as.dist(socialg.mat)  + as.dist(exp.mat)+ as.dist(sex.mat))
+
+ecodist::MRM(as.dist(subsels) ~  as.dist(pair.mat) + as.dist(treat.mat) )
+
+
+all.mrm.res25
+
+
+cnames <- rownames(all.mrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+cnames[grep("pair", cnames)] <- "Pair"
+
+tab <- as.data.frame(all.mrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+# dev.off()
+
+
+# ##on M-M data
+# MMbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsels <- subsels[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMtreat.mat <- treat.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# MMsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-M", colnames(exp.mat) == "M-M"]
+# 
+# MMmrm.res <- MRM(as.dist(MMsels) ~ as.dist(MMtreat.mat) + as.dist(MMbirdID.mat) + as.dist(MMsocialg.mat))
+# MMmrm.res
+# 
+# 
+# ##on M-F data
+# MFbirdID.mat <- birdID.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsels <- subsels[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFtreat.mat <- treat.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# MFsocialg.mat <- socialg.mat[rownames(exp.mat) == "M-F", colnames(exp.mat) == "M-F"]
+# 
+# MFmrm.res <- MRM(as.dist(MFsels) ~ as.dist(MFtreat.mat) + as.dist(MFbirdID.mat) + as.dist(MFsocialg.mat))
+# MFmrm.res
+# 
+# 
+# ##on F-F data
+# FFbirdID.mat <- birdID.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsels <- subsels[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFtreat.mat <- treat.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# FFsocialg.mat <- socialg.mat[rownames(exp.mat) == "F-F", colnames(exp.mat) == "F-F"]
+# 
+# FFmrm.res <- MRM(as.dist(FFsels) ~ as.dist(FFtreat.mat) + as.dist(FFbirdID.mat) + as.dist(FFsocialg.mat))
+# FFmrm.res
+
+
+##on Stable data
+STAbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsels <- subsels[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAtreat.mat <- treat.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAexp.mat <- exp.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STAsex.mat <- sex.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+STApair.mat <- pair.mat[rownames(socialg.mat) == "Stable", colnames(socialg.mat) == "Stable"]
+
+STAmrm.res25 <- ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat) + as.dist(STAbirdID.mat) + as.dist(STAexp.mat)+ as.dist(STAsex.mat))
+STAmrm.res25
+
+ ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat))
+
+cnames <- rownames(STAmrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+
+tab <- as.data.frame(STAmrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+
+
+
+
+
+##on NOVel data
+NOVbirdID.mat <- birdID.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsels <- subsels[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVtreat.mat <- treat.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVexp.mat <- exp.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVsex.mat <- sex.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+NOVpair.mat <- pair.mat[rownames(socialg.mat) == "Novel", colnames(socialg.mat) == "Novel"]
+
+
+NOVmrm.res25 <- ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat) + as.dist(NOVbirdID.mat) + as.dist(NOVexp.mat))
+NOVmrm.res25
+
+ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat))
+
+cnames <- rownames(NOVmrm.res25$coef)
+cnames[grep("treat", cnames)] <- "Period"
+cnames[grep("birdID", cnames)] <- "Bird ID"
+cnames[grep("socialg", cnames)] <- "Social environment"
+cnames[grep("exp", cnames)] <- "Social group"
+cnames[grep("sex", cnames)] <- "Sex"
+
+tab <- as.data.frame(NOVmrm.res25$coef[-1,])
+tab$nms <- cnames[-1]
+
+gridExtra::grid.table(tab[,c(3,1,2)], rows = NULL, cols = c("Predictor", "R-squared", "p-value"))
+
+
+
+
+
+#all results together
+# all.mrm.res
+all.mrm.res25
+
+# STAmrm.res
+STAmrm.res25
+
+# NOVmrm.res
+NOVmrm.res25
+
+length(unique(colnames(NOVbirdID.mat)))
+length(unique(colnames(STAbirdID.mat)))
+unique(colnames(treat.mat))
+unique(colnames(exp.mat))
+unique(colnames(socialg.mat))
+
+
+```
+
+
+```{r regression with matrices fisrt 25 calls 3, eval = F, echo = F}
+#RANDOMIZATION ofregression with matrices for equal sample sizes with PAIR as predictors
+
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$pair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+
+}
+
+# head(cmdsBUD.df)
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+
+# cmdsBUD.df$pair.socialg <- with(cmdsBUD.df, paste(pair, social.group))
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+
+
+############### RANDOMIZATION PROCEDURE ###################
+reps <- 1000
+results <- parallel::mclapply(1:reps, mc.cores = 5, function(x)
+{
+  #subset to the same sample size within pair between treatment
+  subdf <- lapply(unique(cmdsBUD.df$pair), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$pair == x,]
+  Y.Pre <- Y[Y$treatment == "Pre",]
+  Y.Post <- Y[Y$treatment == "Post",]
+ mi <- min(c(nrow(Y.Pre), nrow(Y.Post)))
+  
+   if(mi==0) return(NA) else
+  {
+  if(nrow(Y.Pre) > mi) Y.Pre <- Y.Pre[sample(x = 1:nrow(Y.Pre), size = mi),] else
+ Y.Post <- Y.Post[sample(x = 1:nrow(Y.Post), size = mi),]
+  
+return(rbind(Y.Pre, Y.Post))
+   }    
+ }
+)
+
+ subdf <- subdf[sapply(subdf, is.data.frame)]
+subcmds2 <- droplevels(do.call(rbind, subdf))
+
+##on Stable data
+STAsels <- selsDTW[rownames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Stable"], colnames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Stable"]]
+
+  
+STAexp.mat <- STAsex.mat <- STAbirdID.mat <- STApair.mat <- STAtreat.mat <-  STAsels
+
+rownames(STAexp.mat) <- colnames(STAexp.mat) <- subcmds2$experiment[subcmds2$social.group =="Stable"]
+rownames(STAsex.mat) <- colnames(STAsex.mat) <- subcmds2$sex[subcmds2$social.group =="Stable"]
+rownames(STAbirdID.mat) <- colnames(STAbirdID.mat) <- subcmds2$indiv[subcmds2$social.group =="Stable"]
+rownames(STAtreat.mat) <- colnames(STAtreat.mat) <- subcmds2$treatment[subcmds2$social.group =="Stable"]
+rownames(STApair.mat) <- colnames(STApair.mat) <- subcmds2$pair[subcmds2$social.group =="Stable"]
+
+
+STAexp.mat <- bin.mat(STAexp.mat)
+STAsex.mat <- bin.mat(STAsex.mat)
+STAbirdID.mat <- bin.mat(STAbirdID.mat)
+STAtreat.mat <- bin.mat(STAtreat.mat)
+STApair.mat <- bin.mat(STApair.mat)
+
+# res1 <-ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat))
+
+res1 <-ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat) + as.dist(STAexp.mat) + as.dist(STAsex.mat) + as.dist(STAbirdID.mat))
+
+
+res1 <- as.data.frame(res1$coef[-1,])
+
+names(res1) <- c("Rsquared", "Pvalue")
+
+res1$SocialEnv <- "Stable"
+res1$Predictor <- c("Pair/Group", "Period", "Social group", "Sex", "Bird ID")
+res1 <- res1[,c(4, 1, 2, 3)]
+
+rownames(res1) <- NULL
+
+
+##on NOVel data
+NOVsels <- selsDTW[rownames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Novel"], colnames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Novel"]]
+
+  
+NOVexp.mat <- NOVsex.mat <- NOVbirdID.mat <- NOVpair.mat <- NOVtreat.mat <-  NOVsels
+
+rownames(NOVexp.mat) <- colnames(NOVexp.mat) <- subcmds2$experiment[subcmds2$social.group =="Novel"]
+rownames(NOVsex.mat) <- colnames(NOVsex.mat) <- subcmds2$sex[subcmds2$social.group =="Novel"]
+rownames(NOVbirdID.mat) <- colnames(NOVbirdID.mat) <- subcmds2$indiv[subcmds2$social.group =="Novel"]
+rownames(NOVtreat.mat) <- colnames(NOVtreat.mat) <- subcmds2$treatment[subcmds2$social.group =="Novel"]
+rownames(NOVpair.mat) <- colnames(NOVpair.mat) <- subcmds2$pair[subcmds2$social.group =="Novel"]
+
+NOVexp.mat <- bin.mat(NOVexp.mat)
+NOVsex.mat <- bin.mat(NOVsex.mat)
+NOVbirdID.mat <- bin.mat(NOVbirdID.mat)
+NOVtreat.mat <- bin.mat(NOVtreat.mat)
+NOVpair.mat <- bin.mat(NOVpair.mat)
+
+
+res2 <-ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat) + as.dist(NOVexp.mat) + as.dist(NOVsex.mat) + as.dist(NOVbirdID.mat))
+
+res2 <- as.data.frame(res2$coef[-1,])
+
+names(res2) <- c("Rsquared", "Pvalue")
+
+res2$SocialEnv <- "Novel"
+res2$Predictor <- c("Pair/Group", "Period", "Social group", "Sex", "Bird ID")
+rownames(res2) <- NULL
+res2 <- res2[,c(4, 1, 2, 3)]
+
+return(rbind(res1, res2))
+})
+
+# saveRDS(results, "randomization of MRM on acoustic similarity TREAT-PAIR-SEX_SOCIAL.GROUP_BIRD.RDS")
+
+sig.prop <- lapply(results, function(x)
+  {
+  z <- y <- x[,3]
+  y[z < 0.05] <- 1
+  y[z > 0.05] <- 0
+  return(y)
+  }
+  )
+
+sig.prop <- colSums(do.call(rbind, sig.prop))/reps
+
+ci95.h <- function(x) quantile(x, 0.975)
+ci95.l <- function(x) quantile(x, 0.025)
+
+r.sd <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, sd)
+r.mean <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, mean)
+r.max <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, ci95.h)
+r.min <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, ci95.l)
+
+res.tab <- data.frame(predictor = results[[1]][,1],sig.prop, mean.r.squared = r.mean, lowCI = r.min, upCI = r.max, sd = r.sd)
+
+res.tab$SocialEnv <- results[[1]][,4]
+
+res.tab <- res.tab[,c(7, 1:6)]
+
+
+res.tab[,sapply(res.tab, is.numeric)] <- round(res.tab[,sapply(res.tab, is.numeric)],2)
+res.tab$text <- res.tab$sig.prop
+res.tab$text <- ifelse(res.tab$text>0.95, "*", "")
+
+
+gridExtra::grid.table(res.tab[,-7])
+
+pd <- position_dodge(0.0)
+
+ggplot(res.tab, aes(x = predictor, y = mean.r.squared, colour = SocialEnv, group = SocialEnv)) +
+geom_hline(yintercept = 0) + 
+  geom_errorbar(aes(ymin= lowCI, ymax = upCI), width = 0.3, position=pd, size = 1) +
+  xlab("Predictor") + 
+  ylab("R-squared (effect size)") +
+geom_point(position=pd, size=5, shape=21, fill="white")+
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 8.3), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   scale_colour_grey() +
+   geom_text(aes(x= predictor, y = upCI, label = text), position = pd, size = 10)
+
+
+```
+
+
+```{r pre post scatter plots acoustic space for PAIR/GROUP, eval = F, echo = F}
+
+prepost <- cmdsBUD.df
+
+lapply(unique(prepost$pair), function(x) {
+  Y <- prepost[prepost$pair == x,]
+
+  ggplot(Y, aes(x = mds.1, y = mds.2, color = treatment)) +
+    geom_point(aes(shape = indiv), size = 7) + xlab("MDS.1") + ylab("MDS.2") + ggtitle(paste(x, Y$social.group[1], Y$experiment[1])) + scale_colour_discrete(name="Period")
+
+  })
+
+```
+
+
+```{r regression with matrices v2, eval = F, echo = F}
+#RANDOMIZATION of regression with matrices for equal sample sizes v2 DIDNT WORK DUE TO SMALL SAMPLE SIZES
+
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+# remove the ones with 0s
+ss <- table(cmdsBUD.df$indiv, cmdsBUD.df$treatment)
+
+#sample sizes
+ss <- data.frame(bird = rownames(ss), Pre = ss[,2], Post = ss[,1])
+
+ss$pair <- NA
+ss$pre.partner <- NA
+ss$post.partner <- NA
+ss$sex <- NA
+ss$experiment <- NA
+ss$treatment <- NA
+
+for(x in 1:nrow(ss))
+  {
+  ss$pre.partner[x] <- analysisplan$'Pre Record Partner'[analysisplan$Bird.ID == ss$bird[x]]
+  ss$post.partner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == ss$bird[x]]
+  ss$pair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == ss$bird[x]]
+  ss$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == ss$bird[x]]
+  ss$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == ss$bird[x]]
+  ss$treatment[x] <- analysisplan$Treatment[analysisplan$Bird.ID == ss$bird[x]]
+  }
+
+
+ss <- ss[order(ss$treatment, ss$experiment, ss$pair, ss$sex),]
+
+rownames(ss) <- NULL
+
+gridExtra::grid.table(ss[ss$experiment == "M-F",])
+
+gridExtra::grid.table(ss[ss$experiment != "M-F",])
+
+
+
+
+cmdsBUD.df <- cmdsBUD.df[!cmdsBUD.df$indiv %in% unique(c(rownames(a)[a[,1]==0], rownames(a)[a[,2]==0])),]
+
+
+cmdsBUD.df$indiv <- as.factor(cmdsBUD.df$indiv)
+cmdsBUD.df$day <- as.factor(cmdsBUD.df$day)
+cmdsBUD.df$social.group <- as.factor(cmdsBUD.df$social.group)
+cmdsBUD.df$experiment <- as.factor(cmdsBUD.df$experiment)
+cmdsBUD.df$treatment <- as.factor(cmdsBUD.df$treatment)
+
+# cmdsBUD.df$pair.socialg <- with(cmdsBUD.df, paste(pair, social.group))
+
+#create distance matrices
+bin.mat <- function(X) {Y <- sapply(1:ncol(X), function(x)
+    { 
+    a <-X[,x]
+    st <- colnames(X)[x]
+    sapply(1:length(a), function(y)
+      {
+      if(names(a)[y] == st) 0 else 1
+      })
+    })
+    rownames(Y) <- colnames(Y) <- colnames(X)
+   return(Y)
+    }
+
+MFcmds <- droplevels(cmdsBUD.df[cmdsBUD.df$experiment == "M-F",])
+
+unique(MFcmds$indiv)[!unique(MFcmds$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+############### RANDOMIZATION PR#OCEDURE for M-F group ###################
+#Compare match to post-partner recordings  in pre and post periods
+
+reps <- 2
+results <- parallel::mclapply(1:reps, mc.cores = 5, function(x)
+{
+  #subset to the same sample size within pair between treatment
+  subdf <- lapply(unique(MFcmds$POSTpair), function(x)
+  {
+  Y <- MFcmds[MFcmds$POSTpair == x,]
+
+  if(length(unique(Y$indiv)) == 1) (return(NA)) else
+ { if(Y$social.group[1] == "Novel")
+    {
+  Y.Pre.Novel.1 <- Y[Y$treatment == "Pre" & Y$indiv == unique(Y$indiv)[1],]
+  Y.Post.Novel.1 <- Y[Y$treatment == "Post" & Y$indiv == unique(Y$indiv)[1],]
+    Y.Pre.Novel.2 <- Y[Y$treatment == "Pre" & Y$indiv == unique(Y$indiv)[2],]
+  Y.Post.Novel.2 <- Y[Y$treatment == "Post" & Y$indiv == unique(Y$indiv)[2],]
+ 
+  mi <- min(c(nrow(Y.Pre.Novel.1), nrow(Y.Pre.Novel.1), nrow(Y.Pre.Novel.1), nrow(Y.Pre.Novel.1)))
+  
+   if(mi==0) return(NA) else
+  {
+  if(nrow(Y.Pre.Novel.1) > mi) Y.Pre.Novel.1 <- Y.Pre.Novel.1[sample(x = 1:nrow(Y.Pre.Novel.1), size = mi),]
+    if(nrow(Y.Pre.Novel.2) > mi) Y.Pre.Novel.2 <- Y.Pre.Novel.2[sample(x = 1:nrow(Y.Pre.Novel.2), size = mi),]
+  if(nrow(Y.Post.Novel.1) > mi) Y.Post.Novel.1 <- Y.Post.Novel.1[sample(x = 1:nrow(Y.Post.Novel.1), size = mi),]
+    if(nrow(Y.Post.Novel.2) > mi) Y.Post.Novel.2 <- Y.Post.Novel.2[sample(x = 1:nrow(Y.Post.Novel.2), size = mi),]
+  
+a <- rbind(Y.Pre.Novel.1,Y.Pre.Novel.2,Y.Post.Novel.1,Y.Post.Novel.2)
+return(a[!is.na(a$file.sel),])
+}
+} else
+     {
+  Y.Pre.Stable.1 <- Y[Y$treatment == "Pre" & Y$indiv == unique(Y$indiv)[1],]
+  Y.Post.Stable.1 <- Y[Y$treatment == "Post" & Y$indiv == unique(Y$indiv)[1],]
+    Y.Pre.Stable.2 <- Y[Y$treatment == "Pre" & Y$indiv == unique(Y$indiv)[2],]
+  Y.Post.Stable.2 <- Y[Y$treatment == "Post" & Y$indiv == unique(Y$indiv)[2],]
+ 
+  mi <- min(c(nrow(Y.Pre.Stable.1), nrow(Y.Pre.Stable.1), nrow(Y.Pre.Stable.1), nrow(Y.Pre.Stable.1)))
+  
+   if(mi==0) return(NA) else
+  {
+  if(nrow(Y.Pre.Stable.1) > mi) Y.Pre.Stable.1 <- Y.Pre.Stable.1[sample(x = 1:nrow(Y.Pre.Stable.1), size = mi),]
+    if(nrow(Y.Pre.Stable.2) > mi) Y.Pre.Stable.2 <- Y.Pre.Stable.2[sample(x = 1:nrow(Y.Pre.Stable.2), size = mi),]
+  if(nrow(Y.Post.Stable.1) > mi) Y.Post.Stable.1 <- Y.Post.Stable.1[sample(x = 1:nrow(Y.Post.Stable.1), size = mi),]
+    if(nrow(Y.Post.Stable.2) > mi) Y.Post.Stable.2 <- Y.Post.Stable.2[sample(x = 1:nrow(Y.Post.Stable.2), size = mi),]
+  a <- rbind(Y.Pre.Stable.1,Y.Pre.Stable.2,Y.Post.Stable.1,Y.Post.Stable.2)
+return(a[!is.na(a$file.sel),])
+   }    
+ }
+}}
+)
+
+ subdf <- subdf[sapply(subdf, is.data.frame)]
+subcmds2 <- droplevels(do.call(rbind, subdf))
+
+##on Stable data
+STAsels <- selsDTW[rownames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Stable"], colnames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Stable"]]
+
+  
+# STAexp.mat <- 
+  STAsex.mat <- STAbirdID.mat <- STApair.mat <- STAtreat.mat <-  STAsels
+
+# rownames(STAexp.mat) <- colnames(STAexp.mat) <- subcmds2$experiment[subcmds2$social.group =="Stable"]
+rownames(STAsex.mat) <- colnames(STAsex.mat) <- subcmds2$sex[subcmds2$social.group =="Stable"]
+rownames(STAbirdID.mat) <- colnames(STAbirdID.mat) <- subcmds2$indiv[subcmds2$social.group =="Stable"]
+rownames(STAtreat.mat) <- colnames(STAtreat.mat) <- subcmds2$treatment[subcmds2$social.group =="Stable"]
+rownames(STApair.mat) <- colnames(STApair.mat) <- subcmds2$POSTpair[subcmds2$social.group =="Stable"]
+
+
+# STAexp.mat <- bin.mat(STAexp.mat)
+STAsex.mat <- bin.mat(STAsex.mat)
+STAbirdID.mat <- bin.mat(STAbirdID.mat)
+STAtreat.mat <- bin.mat(STAtreat.mat)
+STApair.mat <- bin.mat(STApair.mat)
+
+# res1 <-ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat))
+
+res1 <-ecodist::MRM(as.dist(STAsels) ~ as.dist(STApair.mat) + as.dist(STAtreat.mat) + as.dist(STAsex.mat) + as.dist(STAbirdID.mat))
+
+
+res1 <- as.data.frame(res1$coef[-1,])
+
+names(res1) <- c("Rsquared", "Pvalue")
+
+res1$SocialEnv <- "Stable"
+res1$Predictor <- c("Post partner", "Period", "Sex", "Bird ID")
+res1 <- res1[,c(4, 1, 2, 3)]
+
+rownames(res1) <- NULL
+
+
+##on NOVel data
+NOVsels <- selsDTW[rownames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Novel"], colnames(selsDTW) %in% subcmds2$file.sel[subcmds2$social.group =="Novel"]]
+
+  
+# NOVexp.mat <- 
+  NOVsex.mat <- NOVbirdID.mat <- NOVpair.mat <- NOVtreat.mat <-  NOVsels
+
+# rownames(NOVexp.mat) <- colnames(NOVexp.mat) <- subcmds2$experiment[subcmds2$social.group =="Novel"]
+rownames(NOVsex.mat) <- colnames(NOVsex.mat) <- subcmds2$sex[subcmds2$social.group =="Novel"]
+rownames(NOVbirdID.mat) <- colnames(NOVbirdID.mat) <- subcmds2$indiv[subcmds2$social.group =="Novel"]
+rownames(NOVtreat.mat) <- colnames(NOVtreat.mat) <- subcmds2$treatment[subcmds2$social.group =="Novel"]
+rownames(NOVpair.mat) <- colnames(NOVpair.mat) <- subcmds2$POSTpair[subcmds2$social.group =="Novel"]
+
+# NOVexp.mat <- bin.mat(NOVexp.mat)
+NOVsex.mat <- bin.mat(NOVsex.mat)
+NOVbirdID.mat <- bin.mat(NOVbirdID.mat)
+NOVtreat.mat <- bin.mat(NOVtreat.mat)
+NOVpair.mat <- bin.mat(NOVpair.mat)
+
+
+res2 <-ecodist::MRM(as.dist(NOVsels) ~ as.dist(NOVpair.mat) + as.dist(NOVtreat.mat) +  as.dist(NOVsex.mat) + as.dist(NOVbirdID.mat))
+
+res2 <- as.data.frame(res2$coef[-1,])
+
+names(res2) <- c("Rsquared", "Pvalue")
+
+res2$SocialEnv <- "Novel"
+res2$Predictor <- c("Post partner", "Period", "Sex", "Bird ID")
+rownames(res2) <- NULL
+res2 <- res2[,c(4, 1, 2, 3)]
+
+return(rbind(res1, res2))
+})
+
+# saveRDS(results, "randomization of MRM on acoustic similarity TREAT-PAIR-SEX_SOCIAL.GROUP_BIRD.RDS")
+
+sig.prop <- lapply(results, function(x)
+  {
+  z <- y <- x[,3]
+  y[z < 0.05] <- 1
+  y[z > 0.05] <- 0
+  return(y)
+  }
+  )
+
+sig.prop <- colSums(do.call(rbind, sig.prop))/reps
+
+ci95.h <- function(x) quantile(x, 0.975)
+ci95.l <- function(x) quantile(x, 0.025)
+
+r.sd <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, sd)
+r.mean <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, mean)
+r.max <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, ci95.h)
+r.min <- apply(do.call(rbind,lapply(results, function(x) x[,2])), 2, ci95.l)
+
+res.tab <- data.frame(predictor = results[[1]][,1],sig.prop, mean.r.squared = r.mean, lowCI = r.min, upCI = r.max, sd = r.sd)
+
+res.tab$SocialEnv <- results[[1]][,4]
+
+res.tab <- res.tab[,c(7, 1:6)]
+
+
+res.tab[,sapply(res.tab, is.numeric)] <- round(res.tab[,sapply(res.tab, is.numeric)],2)
+res.tab$text <- res.tab$sig.prop
+res.tab$text <- ifelse(res.tab$text>0.95, "*", "")
+
+
+gridExtra::grid.table(res.tab[,-7])
+
+pd <- position_dodge(0.0)
+
+ggplot(res.tab, aes(x = predictor, y = mean.r.squared, colour = SocialEnv, group = SocialEnv)) +
+geom_hline(yintercept = 0) + 
+  geom_errorbar(aes(ymin= lowCI, ymax = upCI), width = 0.3, position=pd, size = 1) +
+  xlab("Predictor") + 
+  ylab("R-squared (effect size)") +
+geom_point(position=pd, size=5, shape=21, fill="white")+
+  theme_bw() +
+  theme(strip.text.x = element_text(size = 8.3), panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   scale_colour_grey() +
+   geom_text(aes(x= predictor, y = upCI, label = text), position = pd, size = 10)
+
+
+```
+
+
+```{r distance to post partner, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+
+
+# remove the ones with 0s
+ss <- table(cmdsBUD.df$indiv, cmdsBUD.df$treatment)
+
+# distance to partner
+reps <- 1000
+
+mdists1 <- parallel::mclapply(1:reps, mc.cores = 5,function(z)
+{mean.dist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y1pre <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Pre"]
+  Y1post <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Post"]
+  Y2post <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == cmdsBUD.df$POSTpartner[cmdsBUD.df$indiv ==x][1] & cmdsBUD.df$treatment == "Post"]
+ 
+  min.n <- c(length(Y1pre), length(Y1post), length(Y2post))
+ min.n <- min(min.n[min.n > 0])
+  
+  if(length(Y2post) > 0)
+{ if(length(Y1pre) > 0) {Y1pre <- sample(Y1pre, min.n)
+  pre.dist <- selsDTW[rownames(selsDTW) %in% Y1pre, colnames(selsDTW) %in% Y2post]
+  pre.dist <- mean(pre.dist, na.rm = T)} else pre.dist <- NA
+  
+  if(length(Y1post) > 0){ Y1post <- sample(Y1post, min.n)
+  Y2post <- sample(Y2post, min.n)
+  post.dist <- selsDTW[rownames(selsDTW) %in% Y1post, colnames(selsDTW) %in% Y2post]
+  post.dist <- mean(post.dist, na.rm = T)} else post.dist <- NA
+  }
+else pre.dist <- post.dist <- NA
+  
+ Z <- data.frame(target = x,  partner = cmdsBUD.df$POSTpartner[cmdsBUD.df$indiv ==x][1], pre.dist, post.dist, sex.target = cmdsBUD.df$sex[cmdsBUD.df$indiv == x][1], experiment = cmdsBUD.df$experiment[cmdsBUD.df$indiv == x][1], treatment = cmdsBUD.df$social.group[cmdsBUD.df$indiv == x][1], minimun.n = min.n)
+ return(Z) 
+ })
+
+mean.dist <- do.call(rbind, mean.dist)
+# 
+# mean.dist <- mean.dist[!is.na(mean.dist$post.dist),]
+# 
+# mean.dist <- mean.dist[!is.na(mean.dist$pre.dist),]
+# 
+# mean.dist <- mean.dist[order(mean.dist$sex.target, mean.dist$experiment), ]
+# 
+# 
+# for(i in 1:(nrow(mean.dist)-1))
+#   { if(i >= (nrow(mean.dist))) break
+#   if(any(as.character(mean.dist$partner) == as.character(mean.dist$target)[i]))
+#   mean.dist <- mean.dist[as.character(mean.dist$partner) != as.character(mean.dist$target)[i],]
+# }
+
+return(mean.dist)
+
+})
+
+mean.dist <- mdists1[[1]]
+
+mean.dist <- mean.dist[order(mean.dist$target), ]
+
+mdists <- do.call(rbind, mdists1)
+
+mean.dist[,3:4] <-  aggregate(mdists[,3:4], by = list(mdists$target), mean)[2:3]
+
+# mean.dist <- mean.dist[order(mean.dist$treatment, mean.dist$experiment), ]
+
+
+
+# mean.dist <- mean.dist[!is.na(mean.dist$post.dist),]
+
+mean.dist <- mean.dist[!is.na(mean.dist$post.dist),]
+
+
+# for(i in 1:(nrow(mean.dist)-1))
+#   { if(i >= (nrow(mean.dist))) break
+#   if(any(as.character(mean.dist$partner) == as.character(mean.dist$target)[i]))
+#   mean.dist <- mean.dist[as.character(mean.dist$partner) != as.character(mean.dist$target)[i],]
+# }
+
+mean.dist$post.pair <- NA
+y = 1
+
+#label pairs
+for(i in 1:(nrow(mean.dist)-1))
+  { if(i >= (nrow(mean.dist))) break
+if(is.na(mean.dist$post.pair[i])){ mean.dist$post.pair[i] <- paste0("P", y)
+  mean.dist$post.pair[as.character(mean.dist$partner) == as.character(mean.dist$target[i])] <- paste0("P", y)
+y = y + 1                                   
+    }
+}
+
+mean.dist <- mean.dist[order(mean.dist$post.pair), ]
+
+mean.dist <- mean.dist[order(mean.dist$treatment, mean.dist$post.pair, mean.dist$experiment, mean.dist$sex.target), ]
+
+mean.dist
+
+gridExtra::grid.table(mean.dist[,-3], rows = NULL)
+
+```
+
+
+```{r distance to post group subsamplig/permtuting, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan", )[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+
+
+# distance to partner
+reps <- 1000
+
+mdists1 <- parallel::mclapply(1:reps, mc.cores = 5,function(z)
+{mean.dist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  { 
+  ls <- list() 
+  pst <- unique(cmdsBUD.df$indiv[cmdsBUD.df$POSTpair == cmdsBUD.df$POSTpair[cmdsBUD.df$indiv == x][1]])
+  
+  pst <- pst[!pst %in% x]
+
+  #pre-focal
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Pre"]
+
+  #post-focal 
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Post"]
+  
+  #post partner1
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+ 
+  #post partner2
+  if(length(pst) > 1)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner3
+  if(length(pst) > 2)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[2] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner4
+  if(length(pst) > 3)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[3] & cmdsBUD.df$treatment == "Post"]
+
+  #calculate minimum of all data sets
+min.n <- min(sapply(ls[sapply(ls, length) > 0], length))
+ 
+#subset
+ls <- lapply(ls, function(x) if(length(x) > 0) sample(x, min.n))
+
+ppdist <- unlist(ls[-c(1:2)])
+
+  if(!is.null(ls[[1]]))
+{  pre.dist <- selsDTW[rownames(selsDTW) %in% ls[[1]], colnames(selsDTW) %in% ppdist]
+  pre.dist <- mean(pre.dist, na.rm = T)} else pre.dist <- NA
+  if(!is.null(ls[[2]]))  
+  {post.dist <- selsDTW[rownames(selsDTW) %in% ls[[2]], colnames(selsDTW) %in% ppdist]
+  post.dist <- mean(post.dist, na.rm = T)} else post.dist <- NA
+
+  
+ Z <- data.frame(target = x,  postpair = cmdsBUD.df$POSTpair[cmdsBUD.df$indiv ==x][1], pre.dist, post.dist, sex.target = cmdsBUD.df$sex[cmdsBUD.df$indiv == x][1], experiment = cmdsBUD.df$experiment[cmdsBUD.df$indiv == x][1], treatment = cmdsBUD.df$social.group[cmdsBUD.df$indiv == x][1], minimun.n = min.n)
+ return(Z) 
+ })
+
+mean.dist <- do.call(rbind, mean.dist)
+# 
+# mean.dist <- mean.dist[!is.na(mean.dist$post.dist),]
+# 
+# mean.dist <- mean.dist[!is.na(mean.dist$pre.dist),]
+# 
+# mean.dist <- mean.dist[order(mean.dist$sex.target, mean.dist$experiment), ]
+# 
+# 
+# for(i in 1:(nrow(mean.dist)-1))
+#   { if(i >= (nrow(mean.dist))) break
+#   if(any(as.character(mean.dist$partner) == as.character(mean.dist$target)[i]))
+#   mean.dist <- mean.dist[as.character(mean.dist$partner) != as.character(mean.dist$target)[i],]
+# }
+
+return(mean.dist)
+
+})
+
+mean.dist2 <- mdists1[[1]]
+
+mean.dist2 <- mean.dist2[order(mean.dist2$target), ]
+
+mdists <- do.call(rbind, mdists1)
+
+mean.dist2[,3:4] <-  aggregate(mdists[,3:4], by = list(mdists$target), mean)[2:3]
+
+
+# mean.dist2 <- mean.dist2[order(mean.dist2$treatment, mean.dist2$experiment), ]
+
+
+
+mean.dist2 <- mean.dist2[!is.na(mean.dist2$post.dist),]
+mean.dist2
+# mean.dist2 <- mean.dist2[!is.na(mean.dist2$pre.dist),]
+
+
+# for(i in 1:(nrow(mean.dist2)-1))
+#   { if(i >= (nrow(mean.dist2))) break
+#   if(any(as.character(mean.dist2$partner) == as.character(mean.dist2$target)[i]))
+#   mean.dist2 <- mean.dist2[as.character(mean.dist2$partner) != as.character(mean.dist2$target)[i],]
+# # }
+# 
+# mean.dist2$post.pair <- NA
+# y = 1
+# 
+# #label pairs
+# for(i in 1:(nrow(mean.dist2)-1))
+#   { if(i >= (nrow(mean.dist2))) break
+# if(is.na(mean.dist2$post.pair[i])){ mean.dist2$post.pair[i] <- paste0("P", y)
+#   mean.dist2$post.pair[as.character(mean.dist2$partner) == as.character(mean.dist2$target[i])] <- paste0("P", y)
+# y = y + 1                                   
+#     }
+# }
+# 
+# mean.dist2 <- mean.dist2[order(mean.dist2$post.pair), ]
+# 
+# mean.dist2 <- mean.dist2[order(mean.dist2$treatment, mean.dist2$post.pair, mean.dist2$experiment, mean.dist2$sex.target), ]
+# 
+# mean.dist2
+
+saveRDS(mean.dist2, "/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/mean distance to postgroup.RDS")
+
+
+```
+
+
+```{r stats on mean distance to postgroup, eval = F, echo = F}
+
+mean.dist2 <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/mean distance to postgroup.RDS")
+
+
+# with(mean.dist2, boxplot(post.dist~treatment + experiment + sex.target, xlab = "Period/Environment", ylab = "Acoustic distance"))
+
+Cand.models <- list( )
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ 1 + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ treatment + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ experiment + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ sex.target + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ sex.target + experiment + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ sex.target + treatment + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ treatment + experiment + (1|postpair), data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(post.dist ~ sex.target + treatment + experiment + (1|postpair), data = mean.dist2, REML = F)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+# Modnames<-gsub("~mean.dist2","dist~",Modnames)
+
+Modnames <- gsub("~post.dist", "Distance~", Modnames)
+# Modnames <- gsub("social.group", "Social environment", Modnames)
+# Modnames <- gsub("treatment", "Period", Modnames)
+# Modnames <- gsub("+ (1 | indiv) + (1 | experiment) + (1 | sex)", "", Modnames, fixed = T)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+
+mod1<-lmer(post.dist ~ 1 + sex.target + treatment +  (1|postpair), data = mean.dist2, REML = F)
+
+confint(mod1)
+
+mod1<-lmer(post.dist ~ 1 + experiment + treatment +  (1|postpair), data = mean.dist2, REML = F)
+
+confint(mod1)
+
+#confidence set
+cs <- confset(cand.set = Cand.models, modnames = Modnames, second.ord = T, method = "raw")
+
+confmodels <- Cand.models[Modnames %in% cs$table[,1]]
+
+confmodnames <- Modnames[Modnames %in% cs$table[,1]]
+
+str(cs)
+
+grid.table(cs$table)
+
+# treatment effect
+# es <- list()
+# 
+# a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(treatment = c("Pre", "Post"), social.group = c("Novel", "Novel")))
+# 
+# es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor="Novel",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+# 
+
+
+
+```
+
+
+```{r stats on mean distance between pre and post, eval = F, echo = F}
+
+mean.dist2 <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/mean distance to postgroup.RDS")
+
+mean.dist2 <- mean.dist2[!is.na(mean.dist2$post.dist),]
+mean.dist2
+
+rd1 <- mean.dist2[,-3]
+rd2 <- mean.dist2[,-4]
+
+rd1$period <- "Post"
+rd2$period <- "Pre"
+
+names(rd1)[3] <- names(rd2)[3] <- "dist"
+
+mean.dist2 <-rbind(rd1, rd2)
+
+mean.dist2 <- mean.dist2[!is.na(mean.dist2$dist),]
+
+
+Cand.models <- list( )
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ 1 + (1|postpair) , data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~  treatment + (1|postpair) , data = mean.dist2, REML = F)
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ experiment + (1|postpair) , data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period + (1|postpair) , data = mean.dist2, REML = F)
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ sex.target + (1|postpair) , data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period * treatment + (1|postpair) , data = mean.dist2, REML = F)
+
+Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period + treatment + (1|postpair) , data = mean.dist2, REML = F)
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period * treatment + experiment + (1|postpair) , data = mean.dist2, REML = F)
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period * treatment + sex.target + (1|postpair) , data = mean.dist2, REML = F)
+
+# Cand.models[[length(Cand.models)+1]]<-lmer(dist ~ period * treatment + sex.target + experiment + (1|postpair) , data = mean.dist2, REML = F)
+
+# Modnames<-gsub("~mean.dist2","dist~",Modnames)
+
+Modnames <- sapply(Cand.models, function(x) paste(as.formula(x), collapse = ""))
+
+
+Modnames <- gsub("~dist", "Distance~", Modnames)
+
+aictabs <- aictab(cand.set = Cand.models, modnames = Modnames, second.ord = T)
+
+aictabs
+
+mod1<-lmer(dist ~ 1 + period + sex.target + treatment +  (1|postpair), data = mean.dist2, REML = F)
+mod1
+
+confint(mod1)
+
+
+mod1<-lmer(dist ~ period * treatment +  (1|postpair), data = mean.dist2, REML = F)
+
+lmerTest::lsmeans(mod1, test.effs="period:treatment")
+lmerTest::lsmeans(mod1)
+
+lmerTest::lsmeans(mod1, test.effs="period")
+
+
+confint(mod1)
+
+
+es[[length(es)+1]]<-data.frame(variable="Pre-Post",factor1="Stable",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+a<-modavgEffect(cand.set = confmodels, modnames = confmodnames, newdata = data.frame(period = c("Pre", "Pre"), treatment = c("Stable", "Novel")))
+
+# es[[length(es)+1]]<-data.frame(variable="Stable-Novel",factor1="Pre",effect_size=a$Mod.avg.eff, lowerCI= a$Lower.CL, upperCI=a$Upper.CL)
+
+
+
+es
+
+```
+
+
+```{r distance diff between pre and post group complete data set, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan")[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+
+
+# distance to partner
+
+  raw.dist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  { 
+  ls <- list() 
+  pst <- unique(cmdsBUD.df$indiv[cmdsBUD.df$POSTpair == cmdsBUD.df$POSTpair[cmdsBUD.df$indiv == x][1]])
+  
+  pst <- pst[!pst %in% x]
+
+  #pre-focal
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Pre"]
+
+  #post-focal 
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Post"]
+  
+  #post partner1
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+ 
+  #post partner2
+  if(length(pst) > 1)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner3
+  if(length(pst) > 2)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[2] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner4
+  if(length(pst) > 3)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[3] & cmdsBUD.df$treatment == "Post"]
+
+pretarg <- ls[[1]]
+posttarg <- ls[[2]]
+
+  #calculate minimum of all data sets
+min.n.post <- min(sapply(ls[sapply(ls, length) > 0][-1], length))
+min.n <- min(sapply(ls[sapply(ls, length) > 0], length))
+
+#subset
+ls <- lapply(ls[-c(1:2)], function(x) if(length(x) > 0) as.character(x))
+
+
+
+ls <- ls[!sapply(ls, is.null)]
+
+
+ppdist <- unlist(ls)
+
+
+  if(!is.null(pretarg))
+{  pre.dist <- selsDTW[rownames(selsDTW) %in% pretarg, colnames(selsDTW) %in% ppdist]
+  pre.dist <- mean(pre.dist, na.rm = T)} else pre.dist <- NA
+  if(!is.null(posttarg))  
+  {post.dist <- selsDTW[rownames(selsDTW) %in% posttarg, colnames(selsDTW) %in% ppdist]
+  post.dist <- mean(post.dist, na.rm = T)} else post.dist <- NA
+
+  
+ Z <- data.frame(target = x,  postpair = cmdsBUD.df$POSTpair[cmdsBUD.df$indiv ==x][1], pre.dist, post.dist, sex.target = cmdsBUD.df$sex[cmdsBUD.df$indiv == x][1], experiment = cmdsBUD.df$experiment[cmdsBUD.df$indiv == x][1], treatment = cmdsBUD.df$social.group[cmdsBUD.df$indiv == x][1], minimun.n = min.n, minimum.n.post = min.n.post)
+ return(Z) 
+ })
+
+raw.dist <- do.call(rbind, raw.dist)
+# 
+
+gridExtra::grid.table(raw.dist[, -c(3, 8)], rows = NULL)
+
+write.csv(raw.dist[,-c(3, 8)], "~/Desktop/Acoustic distance to post-group data set.csv", row.names = F)
+
+
+raw.dist <- raw.dist[!is.na(raw.dist$post.dist),]
+raw.dist
+
+
+mod1<-lmer(post.dist ~ 1 + experiment + sex.target + treatment +  (1|postpair), data = raw.dist)
+
+a <- lmerTest::difflsmeans(mod1)
+
+res <- a[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[,], rows = NULL)
+
+
+
+#single data frame for pre and post distance
+rd1 <- raw.dist[,-3]
+rd2 <- raw.dist[,-4]
+
+rd1$period <- "Post"
+rd2$period <- "Pre"
+
+names(rd1)[3] <- names(rd2)[3] <- "dist"
+
+raw.dist2 <-rbind(rd1, rd2)
+
+raw.dist2 <- raw.dist2[raw.dist2$target %in% raw.dist$target[!is.na(raw.dist$pre.dist)],]
+
+dev.off()
+gridExtra::grid.table(raw.dist[!is.na(raw.dist$pre.dist), -c(7)], rows = NULL)
+
+
+# 
+mod1<-lmer(dist ~ 1 + period * treatment + experiment + (1|postpair) + (1|target), data = raw.dist2)
+
+b <- lmerTest::difflsmeans(mod1)
+
+
+res <- b[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[-c(7:10),], rows = NULL)
+
+write.csv(raw.dist[,-c(8)], "~/Desktop/Acoustic distance to post-group in pre and post data set.csv", row.names = F)
+
+```
+
+
+```{r distance diff between pre and post group complete data set 2, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan")[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+
+
+# distance to partner
+
+  raw.dist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  { 
+  ls <- list() 
+  pst <- unique(cmdsBUD.df$indiv[cmdsBUD.df$POSTpair == cmdsBUD.df$POSTpair[cmdsBUD.df$indiv == x][1]])
+  
+  pst <- pst[!pst %in% x]
+
+  #pre-focal
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Pre"]
+
+  #post-focal 
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Post"]
+  
+  #post partner1
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+ 
+  #post partner2
+  if(length(pst) > 1)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner3
+  if(length(pst) > 2)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[2] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner4
+  if(length(pst) > 3)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[3] & cmdsBUD.df$treatment == "Post"]
+
+pretarg <- ls[[1]]
+posttarg <- ls[[2]]
+
+  #calculate minimum of all data sets
+min.n.post <- min(sapply(ls[sapply(ls, length) > 0][-1], length))
+min.n <- min(sapply(ls[sapply(ls, length) > 0], length))
+
+#subset
+ls <- lapply(ls[-c(1:2)], function(x) if(length(x) > 0) as.character(x))
+
+
+
+ls <- ls[!sapply(ls, is.null)]
+
+
+ppdist <- unlist(ls)
+
+
+  if(!is.null(pretarg))
+{  pre.dist <- selsDTW[rownames(selsDTW) %in% pretarg, colnames(selsDTW) %in% ppdist]
+  pre.dist <- mean(pre.dist, na.rm = T)} else pre.dist <- NA
+  if(!is.null(posttarg))  
+  {post.dist <- selsDTW[rownames(selsDTW) %in% posttarg, colnames(selsDTW) %in% ppdist]
+  post.dist <- mean(post.dist, na.rm = T)} else post.dist <- NA
+
+  
+ Z <- data.frame(target = x,  postpair = cmdsBUD.df$POSTpair[cmdsBUD.df$indiv ==x][1], pre.dist, post.dist, sex.target = cmdsBUD.df$sex[cmdsBUD.df$indiv == x][1], experiment = cmdsBUD.df$experiment[cmdsBUD.df$indiv == x][1], treatment = cmdsBUD.df$social.group[cmdsBUD.df$indiv == x][1], minimun.n = min.n, minimum.n.post = min.n.post)
+ return(Z) 
+ })
+
+raw.dist <- do.call(rbind, raw.dist)
+# 
+
+gridExtra::grid.table(raw.dist[, -c(3, 8)], rows = NULL)
+
+write.csv(raw.dist[,-c(3, 8)], "~/Desktop/Acoustic distance to post-group data set.csv", row.names = F)
+
+
+raw.dist <- raw.dist[!is.na(raw.dist$post.dist),]
+raw.dist
+
+
+mod1<-lmer(post.dist ~ 1 + experiment + sex.target + treatment +  (1|postpair), data = raw.dist)
+
+a <- lmerTest::difflsmeans(mod1)
+
+res <- a[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[,], rows = NULL)
+
+
+
+#single data frame for pre and post distance
+rd1 <- raw.dist[,-3]
+rd2 <- raw.dist[,-4]
+
+rd1$period <- "Post"
+rd2$period <- "Pre"
+
+names(rd1)[3] <- names(rd2)[3] <- "dist"
+
+raw.dist2 <-rbind(rd1, rd2)
+
+raw.dist2 <- raw.dist2[raw.dist2$target %in% raw.dist$target[!is.na(raw.dist$pre.dist)],]
+
+dev.off()
+gridExtra::grid.table(raw.dist[!is.na(raw.dist$pre.dist), -c(7)], rows = NULL)
+
+
+# 
+mod1<-lmer(dist ~ 1 + period * treatment + experiment + (1|postpair) + (1|target), data = raw.dist2)
+
+b <- lmerTest::difflsmeans(mod1)
+
+
+res <- b[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[-c(7:10),], rows = NULL)
+
+# write.csv(raw.dist[!is.na(raw.dist$pre.dist),-c(8)], "~/Desktop/Acoustic distance to post-group in pre and post data set.csv", row.names = F)
+
+```
+
+
+```{r distance diff between pre and post group complete data set birds with more than 4 calls, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan")[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+
+
+# distance to partner
+
+  raw.dist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  { 
+  ls <- list() 
+  pst <- unique(cmdsBUD.df$indiv[cmdsBUD.df$POSTpair == cmdsBUD.df$POSTpair[cmdsBUD.df$indiv == x][1]])
+  
+  pst <- pst[!pst %in% x]
+
+  #pre-focal
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Pre"]
+
+  #post-focal 
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == x & cmdsBUD.df$treatment == "Post"]
+  
+  #post partner1
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+ 
+  #post partner2
+  if(length(pst) > 1)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[1] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner3
+  if(length(pst) > 2)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[2] & cmdsBUD.df$treatment == "Post"]
+  
+    #post partner4
+  if(length(pst) > 3)  
+  ls[[length(ls) + 1]] <- cmdsBUD.df$file.sel[cmdsBUD.df$indiv == pst[3] & cmdsBUD.df$treatment == "Post"]
+
+pretarg <- ls[[1]]
+posttarg <- ls[[2]]
+
+  #calculate minimum of all data sets
+min.n.post <- min(sapply(ls[sapply(ls, length) > 0][-1], length))
+min.n <- min(sapply(ls[sapply(ls, length) > 0], length))
+
+#subset
+ls <- lapply(ls[-c(1:2)], function(x) if(length(x) > 0) as.character(x))
+
+
+
+ls <- ls[!sapply(ls, is.null)]
+
+
+ppdist <- unlist(ls)
+
+
+  if(!is.null(pretarg))
+{  pre.dist <- selsDTW[rownames(selsDTW) %in% pretarg, colnames(selsDTW) %in% ppdist]
+  pre.dist <- mean(pre.dist, na.rm = T)} else pre.dist <- NA
+  if(!is.null(posttarg))  
+  {post.dist <- selsDTW[rownames(selsDTW) %in% posttarg, colnames(selsDTW) %in% ppdist]
+  post.dist <- mean(post.dist, na.rm = T)} else post.dist <- NA
+
+  
+ Z <- data.frame(target = x,  postpair = cmdsBUD.df$POSTpair[cmdsBUD.df$indiv ==x][1], pre.dist, post.dist, sex.target = cmdsBUD.df$sex[cmdsBUD.df$indiv == x][1], experiment = cmdsBUD.df$experiment[cmdsBUD.df$indiv == x][1], treatment = cmdsBUD.df$social.group[cmdsBUD.df$indiv == x][1], minimun.n = min.n, minimum.n.post = min.n.post)
+ return(Z) 
+ })
+
+raw.dist <- do.call(rbind, raw.dist)
+# 
+
+gridExtra::grid.table(raw.dist[, -c(3, 8)], rows = NULL)
+
+write.csv(raw.dist[,-c(3, 8)], "~/Desktop/Acoustic distance to post-group data set.csv", row.names = F)
+
+
+raw.dist <- raw.dist[!is.na(raw.dist$post.dist),]
+raw.dist
+
+
+mod1<-lmer(post.dist ~ 1 + experiment + sex.target + treatment +  (1|postpair), data = raw.dist)
+
+a <- lmerTest::difflsmeans(mod1)
+
+res <- a[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[,], rows = NULL)
+
+
+
+#single data frame for pre and post distance
+rd1 <- raw.dist[,-3]
+rd2 <- raw.dist[,-4]
+
+rd1$period <- "Post"
+rd2$period <- "Pre"
+
+names(rd1)[3] <- names(rd2)[3] <- "dist"
+
+raw.dist2 <-rbind(rd1, rd2)
+
+raw.dist2 <- raw.dist2[raw.dist2$target %in% raw.dist$target[!is.na(raw.dist$pre.dist)],]
+
+raw.dist2 <- droplevels(raw.dist2[raw.dist2$minimum.n.post > 4, ])
+
+nrow(raw.dist2)
+
+var1 <- raw.dist2$dist
+#check distributions
+car::qqp(var1, "norm")
+car::qqp(log(var1), "norm")
+car::qqp(var1, "lnorm")
+car::qqp(var1, "t", df =48)
+gamma <- fitdistr(var1, "gamma")
+car::qqp(var1, "chisq", df =4)
+car::qqp(var1, "gamma", shape = gamma$estimate[[1]], rate = gamma$estimate[[2]])
+
+
+dev.off()
+gridExtra::grid.table(raw.dist[!is.na(raw.dist$pre.dist) & raw.dist$minimum.n.post >4, -c(7)], rows = NULL)
+
+# raw.dist2$dist <- log(raw.dist2$dist)
+
+mod1<-lmer(dist ~ period * treatment + experiment + (1|postpair) + (1|target), data = raw.dist2)
+mod1.1<-lmer(dist ~ period * treatment + experiment + minimun.n + (1|postpair) + (1|target), data = raw.dist2)
+mod2<-lmerTest::lmer(dist ~ 1 + (1|postpair) + (1|target), data = raw.dist2)
+mod3<-lmer(dist ~ period * treatment  + (1|postpair) + (1|target), data = raw.dist2)
+mod4<-lmer(dist ~  experiment + (1|postpair) + (1|target), data = raw.dist2)
+mod5<-lmer(dist ~ treatment  + (1|postpair) + (1|target), data = raw.dist2)
+mod6<-lmer(dist ~ experiment + treatment + (1|postpair) + (1|target), data = raw.dist2)
+
+
+aict <- AIC(mod1, mod1.1,mod2, mod3, mod4, mod5, mod6)
+aict$models <- c("dist ~ period * treatment + experiment + (1|postpair) + (1|target)", "dist ~ period * treatment + experiment + minimun.n + (1|postpair) + (1|target)", "dist ~ 1 + (1|postpair) + (1|target)", "dist ~ period * treatment  + (1|postpair) + (1|target)", "dist ~  experiment + (1|postpair) + (1|target)", "dist ~ treatment  + (1|postpair) + (1|target)", "dist ~ experiment + treatment + (1|postpair) + (1|target)")
+aict <- aict[order(aict$AIC), c(3, 1, 2)]
+aict$Delta.AIC <- aict$AIC - min(aict$AIC)
+aict
+
+gridExtra::grid.table(aict, rows = NULL)
+
+summary(mod1)
+
+
+b <- lmerTest::difflsmeans(mod1)
+
+# lmerTest::lsmeans(mod1)
+
+res <- b[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+dev.off()
+gridExtra::grid.table(res[-c(7:10),], rows = NULL)
+
+write.csv(raw.dist[!is.na(raw.dist$pre.dist) & raw.dist$minimum.n.post > 4,-c(8)], "~/Desktop/Acoustic distance to post-group in pre and post data set at least 5 calls.csv", row.names = F)
+
+
+##plot
+agg1 <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$treatment, raw.dist2$period), mean)
+
+agg1$se <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$treatment, raw.dist2$period), function(x) sd(x)/sqrt(mean(x)))[,3]
+
+agg1$lCI <- unlist(aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$treatment, raw.dist2$period), mean_cl_boot)[,3][,2])
+
+agg1$uCI <- unlist(aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$treatment, raw.dist2$period), mean_cl_boot)[,3][,3])
+
+names(agg3) <- c("Period", "Distance", "se")
+
+
+agg3$Period <- factor(agg3$Period, levels= c("Pre", "Post"))
+
+names(agg1) <- c("Treatment", "Period", "Distance", "se", "lCI", "uCI")
+
+agg1$Period <- factor(agg1$Period, levels= c("Pre", "Post"))
+
+#with SE
+ggplot(agg1, aes(x = Period, y = Distance, colour = Treatment, group = Treatment)) + 
+    geom_errorbar(aes(ymin = Distance-se, ymax = Distance + se), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() 
+
+#with 95% CI
+# ggplot(agg1, aes(x = Period, y = Distance, colour = Treatment, group = Treatment)) + 
+#     geom_errorbar(aes(ymin = lCI, ymax = uCI), width=.1) +
+#     geom_line() +
+#     geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+#     ylab("Acoustic distance") +
+#     theme_bw() 
+# 
+
+
+#for treatment
+agg2 <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$experiment), mean)
+
+agg2$se <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$experiment), function(x) sd(x)/sqrt(mean(x)))[,2]
+
+names(agg2) <- c("Experiment", "Distance", "se")
+
+ggplot(agg2, aes(x = Experiment, y = Distance)) + 
+    geom_errorbar(aes(ymin = Distance-se, ymax = Distance + se), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() 
+
+
+#for period only
+agg3 <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$period), mean)
+
+agg3$se <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$period), function(x) sd(x)/sqrt(mean(x)))[,2]
+
+names(agg3) <- c("Period", "Distance", "se")
+
+
+agg3$Period <- factor(agg3$Period, levels= c("Pre", "Post"))
+
+ggplot(agg3, aes(x = Period, y = Distance)) + 
+    geom_errorbar(aes(ymin = Distance-se, ymax = Distance + se), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() +
+theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank())
+
+agg4 <- aggregate(as.data.frame(raw.dist2$dist), by = list(raw.dist2$postpair, raw.dist2$period), mean)
+
+names(agg4) <- c("Individual", "Period", "Distance")
+
+
+agg4$Period <- factor(agg4$Period, levels= c("Pre", "Post"))
+
+
+
+# Plot the individuals
+ymax <- max(agg4$Distance)
+ymin <- min(agg4$Distance)
+
+ggplot(agg4, aes(x=Period, y=Distance, colour=Individual, group=Individual)) +
+    geom_line() + geom_point(shape=21, fill="white") + 
+    ylim(ymin,ymax)
+
+# Effect size plot
+efsi <- res[-c(7:10),]
+
+names(efsi) <- gsub(" ", ".", names(efsi))
+efsi$predictor <- gsub("period |treatment|period:treatment", "", efsi$predictor)
+
+ggplot(efsi, aes(x = predictor, y = Estimate)) + 
+    geom_errorbar(aes(ymin = Lower.CI, ymax = Upper.CI), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() +
+theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank()) +
+geom_hline(aes(yintercept = 0)) 
+
+```
+
+
+```{r Calculate distances pre-post by bird itself, eval = F, echo = F}
+selsDTW <- readRDS("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/DTW results.RDS")
+
+cmdsBUD.df <- read.csv("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/cmds budgie calls.csv")
+
+str(cmdsBUD.df)
+
+analysisplan <- readxl::read_excel("/media/twright/E88673588673266A/Budgie analysis/FoxP2 ExpDesign & CallAnalysisPlan.xlsx", sheet = "Call Analysis Plan")[,1:12]
+
+analysisplan <- analysisplan[!is.na(analysisplan$Experiment),]
+
+# str(analysisplan)
+names(analysisplan)[3] <- "Bird.ID"
+
+cmdsBUD.df$indiv <- toupper(cmdsBUD.df$indiv)
+analysisplan$Bird.ID <- toupper(analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(" ", "-", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub(".", "", fixed = T, analysisplan$Bird.ID)
+analysisplan$Bird.ID <- gsub("-(FIESTA)", "", fixed = T, analysisplan$Bird.ID)
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$Bird.ID)]
+
+analysisplan$'Pre Record Partner' <- toupper(analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Pre Record Partner')
+analysisplan$'Pre Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Pre Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Pre Record Partner')]
+
+analysisplan$'Post Record Partner' <- toupper(analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(" ", "-", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub(".", "", fixed = T, analysisplan$'Post Record Partner')
+analysisplan$'Post Record Partner' <- gsub("-(FIESTA)", "", fixed = T, analysisplan$'Post Record Partner')
+
+unique(cmdsBUD.df$indiv)[!unique(cmdsBUD.df$indiv) %in% unique(analysisplan$'Post Record Partner')]
+
+
+cmdsBUD.df$day <- gsub("DAY", "", cmdsBUD.df$day)
+
+cmdsBUD.df$social.group <- NA
+cmdsBUD.df$experiment <- NA
+cmdsBUD.df$treatment <- NA
+cmdsBUD.df$sex <- NA
+cmdsBUD.df$pair <- NA
+cmdsBUD.df$POSTpartner <- NA
+
+for(x in 1:nrow(cmdsBUD.df))
+  {
+  cmdsBUD.df$social.group[x] <- analysisplan$Treatment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+  cmdsBUD.df$experiment[x] <- analysisplan$Experiment[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$treatment[x] <- if(as.numeric(cmdsBUD.df$day[x])<=5) "Pre" else "Post"  
+cmdsBUD.df$sex[x] <- analysisplan$Sex[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpair[x] <- analysisplan$'Post Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$PREpair[x] <- analysisplan$'Pre Group/Pair'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+cmdsBUD.df$POSTpartner[x] <- analysisplan$'Post Record Partner'[analysisplan$Bird.ID == cmdsBUD.df$indiv[x]]
+}
+
+###leave only 2 PRE days
+# For all Stable treatments, 
+# Pre = Days 3 and 4
+# Post = Day 6 (sac day)
+# For all Novel treatments
+# Pre = Days 4 and 5
+# Post = Day 7 (sac day)
+
+lcmds <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  {
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x, ]
+if(Y$social.group[1] == "Stable") Y <- Y[Y$day %in% c("3", "4", "6"),] else
+  Y <- Y[Y$day %in% c("4", "5", "7"),]
+return(Y)
+}
+)
+ 
+cmdsBUD.df <- do.call(rbind, lcmds)
+
+# distance to partner
+
+selfdist <- lapply(unique(cmdsBUD.df$indiv), function(x)
+  { 
+  Y <- cmdsBUD.df[cmdsBUD.df$indiv == x,]
+  predist<- Y$file.sel[Y$treatment == "Pre"]
+  postdist<- Y$file.sel[Y$treatment == "Post"]
+  min.n <-  min(length(predist), length(postdist))
+  if(min.n > 0)
+{  mdist <- selsDTW[rownames(selsDTW) %in% predist, colnames(selsDTW) %in% postdist]
+  mdist <- mean(mdist, na.rm = T)  
+df <- Y[1,c(4, 8:9, 11,13:15)]
+df$dist <- mdist  
+df$minimum.n <- min.n
+return(df)
+} else return(NA)
+})
+selfdist <- selfdist[sapply(selfdist, is.data.frame)]
+
+
+selfdist <- do.call(rbind, selfdist)
+
+head(selfdist)
+
+var1 <- selfdist$dist
+
+#check distributions
+car::qqp(var1, "norm")
+car::qqp(log(var1), "norm")
+car::qqp(var1, "lnorm")
+car::qqp(var1, "t", df =48)
+gamma <- fitdistr(var1, "gamma")
+car::qqp(var1, "chisq", df =4)
+car::qqp(var1, "gamma", shape = gamma$estimate[[1]], rate = gamma$estimate[[2]])
+
+selfdist <- selfdist[selfdist$minimum.n > 4,]
+nrow(selfdist)
+
+dev.off()
+gridExtra::grid.table(selfdist, rows = NULL)
+
+
+mod1<-lmerTest::lmer(dist ~ social.group + experiment + sex + (1|POSTpair), data = selfdist)
+mod2<-lmer(dist ~ 1 + (1|POSTpair), data = selfdist)
+mod3<-lmer(dist ~ social.group + (1|POSTpair), data = selfdist)
+mod4<-lmer(dist ~ experiment + (1|POSTpair), data = selfdist)
+mod5<-lmer(dist ~ sex + (1|POSTpair), data = selfdist)
+mod6<-lmer(dist ~ sex + experiment + (1|POSTpair), data = selfdist)
+mod7<-lmer(dist ~ sex + social.group + (1|POSTpair), data = selfdist)
+mod8<-lmerTest::lmer(dist ~ social.group + experiment * sex + (1|POSTpair), data = selfdist)
+mod9<-lmerTest::lmer(dist ~ social.group * experiment + sex + (1|POSTpair), data = selfdist)
+
+
+aict <- AIC(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9)
+aict[order(aict$AIC),]
+
+# summary(mod1)
+
+b <- lmerTest::difflsmeans(mod9)
+
+# lmerTest::lsmeans(mod1)
+
+res <- b[[1]]
+
+res$predictor <- rownames(res)
+res <- res[c(8, 1:7)]
+
+
+efsi <- res[-c(7:10),]
+
+names(efsi) <- gsub(" ", ".", names(efsi))
+efsi$predictor <- gsub("sex|social.group|experiment|social.group:experiment", "", efsi$predictor)
+
+efsi <- efsi[c(1:6, 8, 10, 11, 12, 15, 16), ]
+
+efsi1 <- efsi[1:6,]
+efsi2 <- efsi[7:12,]
+
+ggplot(efsi1, aes(x = predictor, y = Estimate)) + 
+    geom_errorbar(aes(ymin = Lower.CI, ymax = Upper.CI), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() +
+theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank()) +
+geom_hline(aes(yintercept = 0)) 
+
+ggplot(efsi2, aes(x = predictor, y = Estimate)) + 
+    geom_errorbar(aes(ymin = Lower.CI, ymax = Upper.CI), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() +
+theme(panel.grid.major = element_blank(),
+panel.grid.minor = element_blank()) +
+geom_hline(aes(yintercept = 0)) 
+
+ dev.off()
+gridExtra::grid.table(efsi, rows = NULL)
+ 
+write.csv(selfdist, "~/Desktop/Acoustic distance between pre and post by bird.csv", row.names = F)
+ 
+ 
+# ##plot
+agg1 <- aggregate(as.data.frame(selfdist$dist), by = list(selfdist$experiment), mean)
+
+agg1$se <- aggregate(as.data.frame(selfdist$dist), by = list(selfdist$experiment), function(x) sd(x)/sqrt(mean(x)))[,2]
+
+names(agg1) <- c("Experiment", "Distance", "se")
+
+#with SE
+ggplot(agg1, aes(x = Experiment, y = Distance)) + 
+    geom_errorbar(aes(ymin = Distance-se, ymax = Distance + se), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() 
+
+
+agg2 <- aggregate(as.data.frame(selfdist$dist), by = list(selfdist$experiment, selfdist$social.group), mean)
+
+agg2$se <- aggregate(as.data.frame(selfdist$dist), by = list(selfdist$experiment, selfdist$social.group), function(x) sd(x)/sqrt(mean(x)))[,3]
+
+names(agg2) <- c("Experiment", "Treatment", "Distance", "se")
+
+#with SE
+ggplot(agg2, aes(x = Experiment, y = Distance, color = Treatment)) + 
+    geom_errorbar(aes(ymin = Distance-se, ymax = Distance + se), width=.1) +
+    geom_line() +
+    geom_point(size=3, shape=21, fill="white") + # 21 is filled circle
+    ylab("Acoustic distance") +
+    theme_bw() 
+
+```
+
+
+```{r acoustic space plots with spectros, eval = F, echo = F}
+sels <- read.csv("/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/Selections budgie long term 2017.csv")
+
+cmdsBUD.df <- read.csv("/media/twright/DATA/Dropbox (Wright-Hanley Labs)/FoxP2 Call Analysis/Longterm Female Exp Dahlin/cmds budgie calls.csv")
+
+
+#pre and post of single bird with group POST calls in background and group centroid
+lapply(unique(cmdsBUD.df$indiv), function(x) {
+   Y <- cmdsBUD.df[cmdsBUD.df$indiv == x,]
+  Ypre <- Y[Y$week == "Week 18 & 19", ]
+  Ypost <- Y[Y$week == "Week 1 Post", ]
+  Ypost2 <- Y[Y$week == "Week 2 Post", ]
+#   W <- prepost[prepost$POSTpair == Y$POSTpair[1] & prepost$treatment == "Pre", ]
+# Y <- rbind(Y, W)
+  
+  #select calls closest to mean acoustic space
+ if(nrow(Ypre) > 0)
+   {fspre <- as.character(Ypre$sound.files[which.min(dist(Ypre[,2:3], y = data.frame(mean(Ypre[,2]), mean(Ypre[,3]))))])
+        Zpre <- sels[sels$sound.files == fspre,]
+         predur <- Zpre$end - Zpre$start
+ } else predur <- 0
+        
+  if(nrow(Ypost) > 0)
+{    fspost <- as.character(Ypost$sound.files[which.min(dist(Ypost[,2:3], y = data.frame(mean(Ypost[,2]), mean(Ypost[,3]))))])
+Zpost <- sels[sels$sound.files == fspost,]
+ postdur <- Zpost$end - Zpost$start
+ } else postdur <- 0
+   
+  if(nrow(Ypost2) > 0)
+{    fspost2 <- as.character(Ypost2$sound.files[which.min(dist(Ypost2[,2:3], y = data.frame(mean(Ypost2[,2]), mean(Ypost2[,3]))))])
+Zpost2 <- sels[sels$sound.files == fspost2,]
+ postdur2 <- Zpost2$end - Zpost2$start
+}  else postdur2 <- 0
+  
+  
+ 
+  #and closest to group centroid
+  # mean(Y$mds.1[Y$indiv != x])
+  # G <- prepost[prepost$indiv != x,]
+  #  fsgroup <- as.character(G$file.sel[which.min(dist(G[,2:3], y = data.frame(mean(G[,2]), mean(G[,3]))))])
+  # Gcent <- sel.data[sel.data$sf.sel == fsgroup,]
+  # Gdur <- Gcent$end - Gcent$start
+
+  #adjust all to the same duration
+maxdur <- max(postdur, predur, postdur2)
+    if(maxdur > predur & nrow(Ypre) > 0) 
+    {
+    Zpre$start <- (Zpre$start - (maxdur-predur)/2)
+  Zpre$end <- (Zpre$end + (maxdur-predur)/2)
+  } 
+
+  if(maxdur > postdur & nrow(Ypost) > 0) 
+    {
+    Zpost$start <- (Zpost$start - (maxdur-postdur)/2)
+  Zpost$end <- (Zpost$end + (maxdur-postdur)/2)
+  } 
+  
+  if(maxdur > postdur2 & nrow(Ypost2) > 0) 
+    {
+    Zpost2$start <- (Zpost2$start - (maxdur-postdur)/2)
+  Zpost2$end <- (Zpost2$end + (maxdur-postdur)/2)
+  } 
+
+
+   if(nrow(Ypre) > 0)   
+  wpre <- readWave(filename = as.character(Zpre$sound.files), from = Zpre$start, to = Zpre$end, units = "seconds")
+
+if(nrow(Ypost) > 0)
+   wpost <- readWave(filename = as.character(Zpost$sound.files), from = Zpost$start, to = Zpost$end, units = "seconds")
+
+if(nrow(Ypost2) > 0)
+   wpost2 <- readWave(filename = as.character(Zpost2$sound.files), from = Zpost2$start, to = Zpost2$end, units = "seconds")
+
+  # tiff(filename = file.path("/media/twright/E88673588673266A/Budgie analysis/Paper 3 social context FoxP/Acoustics space change with spectros and group centroid", paste0(x, ".tiff")), units = "px", width = 630, height = 480)
+
+  nf <- layout(matrix(c(9, 9, 9, 9, 1, 2, 5, 8, 1, 3, 6, 8, 1, 4, 7, 8), nr = 4, byrow=TRUE), widths=c(0.2, 1.5, 0.11, 3), heights=c(0.2, 1, 1, 1.2))
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F)
+ text(x = 1, y = 1.05, "Frequency (kHz)", srt = 90, cex = 2) 
+  par(mar = c(0, 2, 0, 0))
+  
+  if(nrow(Ypre) > 0)  
+  spectro(wpre, f = wpre@samp.rate, wl = 300, ovlp = 90, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+
+
+if(nrow(Ypost) > 0)  
+  spectro(wpost, f = wpost@samp.rate, wl = 300, ovlp = 90, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F,axisX = F, tlab = "", cexaxis = 2) else
+  plot(1, col = "white", frame.plot = F, axes = F)
+ 
+
+if(nrow(Ypost2) > 0)  
+{
+  par(mar = c(4, 2, 0, 0))  
+  spectro(wpost2, f = wpost2@samp.rate, wl = 300, ovlp = 90, scale = F, osc = F, flim = c(1.1, 5.9), palette = reverse.gray.colors.1, grid = F, cexaxis = 2, cexlab = 2)
+} else  plot(1, col = "white", frame.plot = F, axes = F)
+
+alpha <- 0.5
+col1 <- adjustcolor( "red2", alpha.f = alpha)  
+col2 <- adjustcolor( "cyan4", alpha.f = alpha)  
+col3 <- adjustcolor( "yellow", alpha.f = alpha)  
+
+Y$col <- as.character(Y$week)
+  Y$col[Y$week ==  "Week 18 & 19"] <- col2
+  Y$col[Y$week ==  "Week 1 Post"] <- col1 
+    Y$col[Y$week ==  "Week 2 Post"] <- col3 
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = col2)
+
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = col3)
+
+
+par(mar = c(4, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F, xlab = "")
+rect(par("usr")[1],par("usr")[3],par("usr")[2],par("usr")[4],col = col1)
+
+
+par(mar = c(4, 6, 0, 0))  
+basecex <- 3
+
+#fix plot if points are overlapped by legend
+a <- Y[Y$mds.1 > max(Y$mds.1) - (diff(range(Y$mds.1)) * 0.2) & Y$mds.2 > max(Y$mds.2) - (diff(range(Y$mds.2)) * 0.2),]
+xlim <- c(min(Y$mds.1) - (diff(range(Y$mds.1)) * 0.035), max(Y$mds.1) + (diff(range(Y$mds.1)) * 0.35))
+ylim <- c(min(Y$mds.2) - (diff(range(Y$mds.2)) * 0.035), max(Y$mds.2) + (diff(range(Y$mds.2)) * 0.35))
+
+if(nrow(a) > 0)  plot(x = Y$mds.1, y = Y$mds.2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", xlim = xlim, ylim = ylim, cex.lab = 2) else
+plot(x = Y$mds.1, y = Y$mds.2, col = "white", pch = 20, cex = basecex,  xlab = "MDS 1", ylab= "MDS 2", cex.lab = 2)
+
+#plot groups Post calls
+# points(x = Y$mds.1[Y$indiv != x], y = Y$mds.2[Y$indiv != x], col = col3, pch = 20, cex = basecex * 1.4)
+
+#plot pre and post indiv calls
+if(nrow(Ypre) > 0)  
+points(x = Ypre$mds.1, y = Ypre$mds.2, col = col2, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Ypost) > 0)  
+  points(x = Ypost$mds.1, y = Ypost$mds.2, col = col3, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Ypost2) > 0)  
+  points(x = Ypost2$mds.1, y = Ypost2$mds.2, col = col1, pch = 20, cex = basecex* 1.4)
+
+if(nrow(Ypre) > 0) 
+{points(x = Y$mds.1[Y$sound.files == fspre], y = Y$mds.2[Y$sound.files == fspre], col = "black", pch = 20, cex = basecex * 1.4)
+points(x = Y$mds.1[Y$sound.files == fspre], y = Y$mds.2[Y$sound.files == fspre], col = "white", pch = 20, cex = basecex)  
+points(x = Y$mds.1[Y$sound.files == fspre], y = Y$mds.2[Y$sound.files == fspre], col = col2, pch = 20, cex = basecex)
+}
+
+if(nrow(Ypost) > 0) 
+{   points(x = Y$mds.1[Y$sound.files == fspost], y = Y$mds.2[Y$sound.files == fspost], col = "black", pch = 20, cex = basecex * 1.4)
+  points(x = Y$mds.1[Y$sound.files == fspost], y = Y$mds.2[Y$sound.files == fspost], col = "white", pch = 20, cex = basecex)
+    points(x = Y$mds.1[Y$sound.files == fspost], y = Y$mds.2[Y$sound.files == fspost], col = col3, pch = 20, cex = basecex)
+}
+
+if(nrow(Ypost2) > 0) 
+{points(x = Y$mds.1[Y$sound.files == fspost2], y = Y$mds.2[Y$sound.files == fspost2], col = "black", pch = 20, cex = basecex * 1.4)
+  points(x = Y$mds.1[Y$sound.files == fspost2], y = Y$mds.2[Y$sound.files == fspost2], col = "white", pch = 20, cex = basecex)
+    points(x = Y$mds.1[Y$sound.files == fspost2], y = Y$mds.2[Y$sound.files == fspost2], col = col1, pch = 20, cex = basecex)
+}    
+
+  #   #plot groups Post calls centroid
+  #   mex <- mean(Y$mds.1[Y$indiv != x])
+  #   mey <- mean(Y$mds.2[Y$indiv != x])
+  #  points(x = mex, y = mey, col = "black", pch = 20, cex = basecex * 1.4)
+  # points(x = mex, y = mey, col = "white", pch = 20, cex = basecex)
+  #   points(x = mex, y = mey, col = col3, pch = 20, cex = basecex)
+  #   
+lims <- par("usr")  
+
+legend(lims[2]-((lims[2] - lims[1]) * 0.35), lims[4]-((lims[4] - lims[3]) * 0.002), lty=c(1,1), col=c(col2, col3, col1), legend = c("Pre", "1 week post", "2 weeks post"), pch = 20, lwd = 0, pt.cex= basecex * 1.5, cex = basecex * 0.5)
+  
+par(mar = c(0, 0, 0, 0))
+plot(1, col = "white", frame.plot = F, axes = F)
+text(1, labels = x, cex = 2)
+# dev.off()
+})
+
+```
+
