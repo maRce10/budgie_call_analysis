@@ -1,0 +1,1022 @@
+---
+title: "Pipeline budgie call analysis oct-2019"
+author: <a href="http://marceloarayasalas.weebly.com/">Marcelo Araya-Salas</a>
+ &nbsp; 
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    self_contained: no
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r packages, echo=F, eval=T, message=FALSE,warning=FALSE,}
+
+rm(list = ls())
+
+# unload all non-based packages
+out <- sapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), function(x) try(detach(x, unload = FALSE, character.only = TRUE), silent = T))
+
+
+x<-c("warbleR", "pbapply", "ranger")
+
+aa <- lapply(x, function(y) {
+  if(!y %in% installed.packages()[,"Package"])  {if(!y %in% c("warbleR", "Rraven")) install.packages(y) else devtools::install_github(paste0("maRce10/", y))
+}
+try(require(y, character.only = T), silent = T)
+  })
+
+options("digits" = 6, "digits.secs" = 5, knitr.table.format = "html", results = 'asis') 
+
+```
+
+```{r functions and parameters, eval = T, echo = F}
+
+syn_drive <- '/media/twright/DATA/SynologyDrive/'
+cons_files <- "/media/twright/DATA/SynologyDrive/consolidated_sound_files"
+spectro_files <- "/media/twright/DATA/SynologyDrive/spectros"
+spectro_files_DONT_TOUCH <- "/media/twright/DATA/SynologyDrive/backup_spectros_DONT_TOUCH"
+# spectro_files_2 <- "/media/twright/DATA/SynologyDrive/spectros_2"
+# spectro_files_DONT_TOUCH_2 <- "/media/twright/DATA/SynologyDrive/backup_spectros_DONT_TOUCH_2"
+
+merge_sels <- function(X, mar, pb = TRUE, parallel = 1) {
+  
+  Y <- X
+  Y$end <- Y$end + mar
+  X$ovlp.sels <- ovlp_sels(X = Y, pb = pb, parallel = parallel)$ovlp.sels
+  
+  # Make NAs (non-mergable) selections its own number
+  X$ovlp.sels[is.na(X$ovlp.sels)] <- 1:(sum(is.na(X$ovlp.sels))) + max(X$ovlp.sels, na.rm = TRUE)
+  
+  # split
+  out <- lapply(unique(X$ovlp.sels), function(x){
+    
+    W <- X[X$ovlp.sels == x, ]
+    W <- song_param(W, "ovlp.sels", pb = FALSE)[ , 1:4]
+    W$selec <- x
+    
+    return(W)
+    })
+
+  merged_sels <- do.call(rbind, out)  
+
+  merged_sels$selec <- 1:nrow(merged_sels)
+  
+  return(merged_sels)  
+}
+
+ovlp_sels2 <- function (X, index = FALSE, pb = TRUE, max.ovlp = 0, relabel = FALSE, 
+          drop = FALSE, priority = NULL, priority.col = NULL, unique.labs = TRUE, 
+          indx.row = FALSE, parallel = 1) 
+{
+  on.exit(pbapply::pboptions(type = .Options$pboptions$type), 
+          add = TRUE)
+  argms <- methods::formalArgs(ovlp_sels)
+  opt.argms <- if (!is.null(getOption("warbleR"))) 
+    getOption("warbleR")  else SILLYNAME <- 0
+  opt.argms <- opt.argms[!sapply(opt.argms, is.null) & names(opt.argms) %in% 
+                           argms]
+  call.argms <- as.list(base::match.call())[-1]
+  opt.argms <- opt.argms[!names(opt.argms) %in% names(call.argms)]
+  if (length(opt.argms) > 0) 
+    for (q in 1:length(opt.argms)) assign(names(opt.argms)[q], 
+                                          opt.argms[[q]])
+  if (is.null(X)) 
+    stop("'X' must be provided (a data frame)")
+  if (!any(is.data.frame(X), is_selection_table(X))) 
+    stop("X is not of a class 'data.frame', 'selection_table'")
+  if (!all(c("sound.files", "selec", "start", "end") %in% 
+           colnames(X))) 
+    stop(paste(paste(c("sound.files", "selec", "start", 
+                       "end")[!(c("sound.files", "selec", "start", "end") %in% 
+                                  colnames(X))], collapse = ", "), "column(s) not found in data frame"))
+  if (any(is.na(c(X$end, X$start)))) 
+    stop("NAs found in start and/or end")
+  if (all(class(X$end) != "numeric" & class(X$start) != "numeric")) 
+    stop("'start' and 'end' must be numeric")
+  if (any(X$end - X$start <= 0)) 
+    stop(paste("Start is higher than or equal to end in", 
+               length(which(X$end - X$start <= 0)), "case(s)"))
+  if (!is.null(priority.col) & !is.null(priority)) {
+    if (!priority.col %in% names(X)) 
+      stop(paste("priority.col", priority.col, "not found"))
+    if (!all(priority %in% unique(X[, priority.col]))) 
+      stop("Not all levels of 'priority.col' included in 'priority'")
+  }
+  X$...ROWNAME... <- rownames(X)
+  ovlpFUN <- function(X, ndx.rw = indx.row) {
+    if (nrow(X) > 1) {
+      X <- X[order(X$start), ]
+      if (relabel) 
+        rownames(X) <- 1:nrow(X)
+      out1 <- lapply(1:(nrow(X)), function(i) {
+        sapply((i):nrow(X), function(j) {
+          if (X$start[j] < X$end[i]) {
+            if (X$end[i] - X$start[j] > max.ovlp) 
+              out <- i        else out <- 0
+          }        else if (X$start[i] == X$start[j] & X$end[i] == 
+                   X$end[j]) 
+            out <- i else 0
+        })
+      })
+    
+      out2 <- as.data.frame(lapply(out1, function(x) c(rep(0, 
+                                                           nrow(X) - length(x)), x)), col.names = 1:length(out1))
+      lbls <- rep(NA, nrow(out2))
+      for (w in 1:nrow(out2)) {
+        if (w == 1) 
+          lbls[w] <- max(out2) + 1  else if (length(which(out2[w, ] != 0)) >= 2) {
+          wh.mn <- which(out2[w, ] != 0)
+          lbls[w] <- lbls[wh.mn[-length(wh.mn)]]
+        } else lbls[w] <- max(lbls, na.rm = TRUE) + 1
+      }
+      unq <- table(lbls)
+      lbls[lbls %in% names(unq)[unq == 1]] <- NA
+      if (length(lbls[!is.na(lbls)]) > 0) 
+        lbls2 <- lbls <- lbls - min(lbls, na.rm = TRUE) + 
+        1
+      lbls.lvls <- unique(lbls)
+      lbls.lvls <- lbls.lvls[!is.na(lbls.lvls)]
+      if (length(lbls.lvls) > 0) 
+        for (e in seq_len(length(lbls.lvls))) if (lbls.lvls[e] != 
+                                                  lbls.lvls[1]) 
+          lbls[lbls2 == lbls.lvls[e]] <- max(lbls2[1:max(which(lbls2 == 
+                                                                 lbls.lvls[e - 1]), na.rm = TRUE)], na.rm = TRUE) + 
+        1
+      if (ndx.rw) {
+        if (length(lbls.lvls) > 0) 
+          X$indx.row <- sapply(1:nrow(out2), function(z) paste(unique(c(rownames(X)[which(out2[z, 
+                                                                                               ] != 0)], rownames(X)[which(out2[, z] != 
+                                                                                                                             0)])), collapse = "/"))  else X$indx.row <- NA
+      }
+      X$ovlp.sels <- lbls
+    }    else {
+      X$ovlp.sels <- NA
+      if (indx.row) 
+        X$indx.row <- NA
+    }
+    return(X)
+  }
+  
+  sX <- split(X, X$sound.files, drop = TRUE)
+  
+  pbapply::pboptions(type = ifelse(pb, "timer", "none"))
+  if (Sys.info()[1] == "Windows" & parallel > 1) 
+    cl <- parallel::makePSOCKcluster(getOption("cl.cores", 
+                                               parallel)) else cl <- parallel
+  
+  out <- pbapply::pblapply(X = sX, cl = cl, FUN = ovlpFUN)
+  out <- do.call(rbind, out)
+  if (unique.labs) {
+    out$ovlp.sels[!is.na(out$ovlp.sels)] <- factor(paste0(out[!is.na(out$ovlp.sels), 
+                                                              "sound.files"], out[!is.na(out$ovlp.sels), "ovlp.sels"]), 
+                                                   levels = unique(as.character(paste0(out[!is.na(out$ovlp.sels), 
+                                                                                           "sound.files"], out[!is.na(out$ovlp.sels), "ovlp.sels"]))))
+    out$ovlp.sels <- as.numeric(out$ovlp.sels)
+  }
+  if (index) 
+    return(which(!is.na(out$ovlp.sels))) else {
+    if (drop) {
+      if (!is.null(priority.col) & !is.null(priority) & 
+          length(priority) > 1) {
+        priority <- priority[!duplicated(priority)]
+        ordr <- as.character(out[, priority.col])
+        for (i in 1:length(priority)) {
+          ordr[ordr == priority[i]] <- i
+        }
+        out <- out[order(out$sound.files, as.numeric(ordr)), 
+                   ]
+      }
+      org.ovlp <- sum(!is.na(out$ovlp.sels))
+      out <- out[dups <- !duplicated(out[, c("ovlp.sels", 
+                                             "sound.files")]) | is.na(out$ovlp.sels), ]
+    }
+    if (pb) 
+      if (any(!is.na(out$ovlp.sels))) {
+        if (drop) 
+          cat(paste(org.ovlp, "selections overlapped,", 
+                    sum(!is.na(out$ovlp.sels)), "were removed")) else cat(sum(!is.na(out$ovlp.sels)), "selections overlapped")
+      }    else cat("No overlapping selections were found")
+    rownames(out) <- out$...ROWNAME...
+    out$...ROWNAME... <- NULL
+    if (indx.row) 
+      out$indx.row[is.na(out$ovlp.sels)] <- NA
+    # out <- out[na.omit(match(paste(X$sound.files, X$selec), 
+                             # paste(out$sound.files, out$selec))), ]
+    return(out)
+  }
+}
+
+```
+
+```{r loop over folder with files type 1, echo=F, eval=F}
+
+current.iter <- 1
+
+while(TRUE) {
+
+# wait 10 secs and check for new files
+  if (current.iter > 1){
+    print("sleeping 30 s...")
+    Sys.sleep(30)  
+  }    
+  
+    current.iter <- 2
+  
+  # start by reading all files
+  wvs <- list.files(pattern = "\\.wav$", full.names = TRUE, recursive = TRUE, path = syn_drive)
+  
+  # put them in a data frame
+  wvs_df <- data.frame(file = basename(wvs), dir = dirname(wvs), full.name = wvs, stringsAsFactors = FALSE)
+  
+    # measure file size
+  file_size <- file.size(wvs_df$full.name)
+  
+  if (any(file_size > 50)) 
+    print(paste(sum(file_size < 50),"files were too small (apparently empty) and were excluded. Check folders: ", paste(unique(wvs_df$dir[file_size < 50]), collapse = " | ")))
+
+    wvs_df <- wvs_df[file_size > 50,]
+
+  
+  # read the data with the file names that have been already processed
+  sw_all <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/processed files.csv", stringsAsFactors = FALSE)
+  
+  # to start from scratch
+  # sw_all <- wvs_df[0,]
+  
+  # remove the ones already in processed files
+  wvs_df <- wvs_df[!wvs_df$file %in% sw_all$file, , drop = FALSE]
+
+      print(paste0(nrow(wvs_df) , " files left (", round((nrow(wvs_df) / (nrow(sw_all) + nrow(wvs_df))), 2) * 100, "%)"))
+
+  if (nrow(wvs_df) > 0){
+  
+  # split in list by directory
+  wvs_split <- split(wvs_df, f = wvs_df$dir)
+  
+  out <- for(i  in 1:length(wvs_split))
+    {
+    X <- wvs_split[[i]]
+    
+    print(paste("detecting signals in", X$dir[1]))
+    
+    #create selection divide each sound file in 3 every 100 s
+    durs <- wav_dur(path = X$dir[1])
+    
+    out <- lapply(unique(durs$sound.files), function(x){
+      
+      Y <- durs[durs$sound.files == x, , drop = FALSE]
+      sq <- seq(0, Y$duration, length.out = 4)
+      
+    df <-  data.frame(sound.files = Y$sound.files[1], selec = 1:(length(sq) - 1), start = sq[-length(sq)], end = sq[-1], dir = X$dir[1], stringsAsFactors = FALSE)
+      
+    })
+    
+    splt3 <- do.call(rbind, out)
+    
+    # autodetec new files
+    ad <- autodetec(X = splt3, threshold = 15, ssmooth = 1000, bp = c(2, 8), osci = F, wl = 300, mindur = 0.02, maxdur = 0.3, img = FALSE, parallel = parallel::detectCores() - 1, redo = FALSE, path = splt3$dir[1], pb = TRUE)
+  
+  # remove NA rows
+  ad2 <- ad[!is.na(ad$start), , drop = FALSE]
+  
+  # read the data with the file names that have been already processed
+  sw_all <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/processed files.csv", stringsAsFactors = FALSE)
+
+    # append new files processed
+    sw <- rbind(X, sw_all)
+    
+    # to start from scratch
+    # sw <- wvs_df[0,]
+    write.csv(sw, "/media/twright/DATA/SynologyDrive/Rcode/processed files.csv", row.names = FALSE)
+    
+    # if something is detected
+    if (nrow(ad2) > 0){
+    
+      # merge sub selections  
+      ad2 <- merge_sels(X = ad2, mar = 0.05, parallel = parallel::detectCores() - 1)
+    
+      # filter by duration again
+      ad2 <- ad2[ad2$end - ad2$start < 0.3 & ad2$end - ad2$start > 0.1, ]
+      
+      if(nrow(ad2) > 0)
+      {
+        ad2$selec <- 1:nrow(ad2)
+        
+        print("measure SNR")
+        ad2 <- sig2noise(X = ad2, mar = 0.05, path = X$dir[1],  bp = c(1, 5), wl = 300)
+      }
+      # keep the ones with a signal to noise ratio higher than 5
+      # ad3 <- ad2[ad2$SNR > 5,]
+      # 
+      # # if nothing above 5 SNR
+      #   if (nrow(ad3) == 0)
+      #     ad3 <- ad2[ad2$SNR > quantile(ad2$SNR, 0.75), ]
+      ad3 <- ad2
+      
+      # if something left
+       if (nrow(ad3) > 0){
+        
+      # add column with original path name
+      ad3$orignal.dir <- X$dir[1]
+      
+      # list previous spectros
+      prv_spectros <- list.files(path = spectro_files_DONT_TOUCH)
+      
+        print(paste("saving", nrow(ad3), "spectros"))
+      
+      # create spectrograms
+      specreator(X = ad3, flim = c(1, 9), ovlp = 50, parallel = parallel::detectCores() - 1, it = "tiff", path = X$dir[1], pb = TRUE, fast.spec = FALSE, wl = 300, osci = TRUE, dest.path = spectro_files_DONT_TOUCH, res = 70)
+      
+      # get the names of new spectrogram files
+      new_spectros <- setdiff(list.files(path = spectro_files_DONT_TOUCH), prv_spectros)
+      
+      # copy those new files to folder with spectros that can be modified
+      file.copy(to = file.path(spectro_files, new_spectros), from = file.path(spectro_files_DONT_TOUCH, new_spectros))
+      
+      
+      # read the data with the detections from files that have been already processed
+      ad_all <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/autodetections.csv", stringsAsFactors = FALSE)
+      
+      # append and save detections
+      ad3 <- rbind(ad3, ad_all)
+      
+      # to start from scracth
+      #ad3 <- ad3[0, ]
+      
+      write.csv(ad3, "/media/twright/DATA/SynologyDrive/Rcode/autodetections.csv", row.names = FALSE)  
+       }
+    }
+  
+  }
+  } else print("no new files found")
+}
+
+
+```
+
+```{r loop over folder with files type 1 ORIGINAL DETECTION SETTINGS, echo=F, eval=F}
+
+current.iter <- 1
+
+while(TRUE) {
+
+# wait 10 secs and check for new files
+  if (current.iter > 1){
+    print("sleeping 30 s...")
+    Sys.sleep(30)  
+  }    
+  
+    current.iter <- 2
+  
+  # start by reading all files
+  wvs <- list.files(pattern = "\\.wav$", full.names = TRUE, recursive = TRUE, path = syn_drive)
+  
+  # put them in a data frame
+  wvs_df <- data.frame(file = basename(wvs), dir = dirname(wvs), full.name = wvs, stringsAsFactors = FALSE)
+  
+  # measure file size
+  file_size <- file.size(wvs_df$full.name)
+  
+  if (any(file_size > 50)) 
+    print(paste(sum(file_size < 50),"some files were too small (apparently empty) and were excluded. Check folders: ", paste(unique(wvs_df$dir[file_size < 50]), collapse = " | ")))
+
+    wvs_df <- wvs_df[file_size > 50,]
+
+    
+  # read the data with the file names that have been already processed
+  sw_all <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/processed files_2.csv", stringsAsFactors = FALSE)
+  
+  # to start from scratch
+  # sw_all <- wvs_df[0,]
+  
+  # remove the ones already in processed files
+  wvs_df <- wvs_df[!wvs_df$file %in% sw_all$file, , drop = FALSE]
+
+      print(paste0(nrow(wvs_df) , " files left (", round((nrow(wvs_df) / (nrow(sw_all) + nrow(wvs_df))), 2) * 100, "%)"))
+
+  if (nrow(wvs_df) > 0){
+  
+  # split in list by directory
+  wvs_split <- split(wvs_df, f = wvs_df$dir)
+  
+  out <- for(i  in 1:length(wvs_split))
+    {
+    X <- wvs_split[[i]]
+    
+    print(paste("detecting signals in", X$dir[1]))
+    
+    #create selection divide each sound file in 3 every 100 s
+    durs <- wav_dur(path = X$dir[1])
+    
+    out <- lapply(unique(durs$sound.files), function(x){
+      
+      Y <- durs[durs$sound.files == x, , drop = FALSE]
+      sq <- seq(0, Y$duration, length.out = 4)
+      
+    df <-  data.frame(sound.files = Y$sound.files[1], selec = 1:(length(sq) - 1), start = sq[-length(sq)], end = sq[-1], dir = X$dir[1], stringsAsFactors = FALSE)
+      
+    })
+    
+    splt3 <- do.call(rbind, out)
+    
+    # autodetec new files ORIGINAL DETECTION SETTINGS
+    ad <- autodetec(X = splt3, threshold = 18, ssmooth = 750, bp = c(0.5, 8), osci = F, wl = 300, mindur = 0.02, maxdur = 0.5, img = FALSE, parallel = parallel::detectCores() - 1, redo = FALSE, path = splt3$dir[1], pb = TRUE)
+  
+  # remove NA rows
+  ad2 <- ad[!is.na(ad$start), , drop = FALSE]
+  
+  # read the data with the file names that have been already processed
+  sw_all <- read.csv( "/media/twright/DATA/SynologyDrive/Rcode/processed files_2.csv", stringsAsFactors = FALSE)
+
+    # append new files processed
+    sw <- rbind(X, sw_all)
+    
+    # to start from scratch
+    # sw <- wvs_df[0,]
+    write.csv(sw, "/media/twright/DATA/SynologyDrive/Rcode/processed files_2.csv", row.names = FALSE)
+    
+    # if something is detected
+    if (nrow(ad2) > 0){
+    
+      # merge sub selections  
+      ad2 <- merge_sels(X = ad2, mar = 0.05, parallel = parallel::detectCores() - 1)
+    
+      # filter by duration again
+      ad2 <- ad2[ad2$end - ad2$start < 0.3 & ad2$end - ad2$start > 0.1, ]
+      
+      if(nrow(ad2) > 0)
+      {
+        ad2$selec <- 1:nrow(ad2)
+        
+        print("measure SNR")
+        ad2 <- sig2noise(X = ad2, mar = 0.05, path = X$dir[1],  bp = c(1, 5), wl = 300)
+      }
+      # keep the ones with a signal to noise ratio higher than 5
+      ad3 <- ad2[ad2$SNR > 5,]
+
+      # if nothing above 5 SNR
+        if (nrow(ad3) == 0)
+          ad3 <- ad2[ad2$SNR > quantile(ad2$SNR, 0.75), ]
+      
+      # if something left
+       if (nrow(ad3) > 0){
+        
+      # add column with original path name
+      ad3$orignal.dir <- X$dir[1]
+      
+      # list previous spectros
+      prv_spectros <- list.files(path = spectro_files_DONT_TOUCH_2)
+      
+        print(paste("saving", nrow(ad3), "spectros"))
+      
+      # create spectrograms
+      specreator(X = ad3, flim = c(1, 9), ovlp = 50, parallel = parallel::detectCores() - 1, it = "tiff", path = X$dir[1], pb = TRUE, fast.spec = FALSE, wl = 300, osci = TRUE, dest.path = spectro_files_DONT_TOUCH_2, res = 70)
+      
+      # get the names of new spectrogram files
+      new_spectros <- setdiff(list.files(path = spectro_files_DONT_TOUCH_2), prv_spectros)
+      
+      # copy those new files to folder with spectros that can be modified
+      file.copy(to = file.path(spectro_files_2, new_spectros), from = file.path(spectro_files_DONT_TOUCH_2, new_spectros))
+      
+      
+      # read the data with the detections from files that have been already processed
+      ad_all <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/autodetections_2.csv", stringsAsFactors = FALSE)
+      
+      # append and save detections
+      ad3 <- rbind(ad3, ad_all)
+      
+      # to start from scracth
+      #ad3 <- ad3[0, ]
+      
+      write.csv(ad3, "/media/twright/DATA/SynologyDrive/Rcode/autodetections_2.csv", row.names = FALSE)  
+       }
+    }
+  
+  }
+  } else print("no new files found")
+}
+
+
+```
+
+
+```{r test to improve detection, eval = FALSE}
+
+man.sls <- read.csv("./Rcode/manual_selection.csv", stringsAsFactors = FALSE)
+
+man.sls$source <- "manual"
+
+pth <- "/media/twright/DATA/SynologyDrive/356WBHM/10_27_19"
+
+
+  #create selection divide each sound file in 3 every 100 s
+    durs <- wav_dur(path = pth)
+    
+    out <- lapply(unique(durs$sound.files), function(x){
+      
+      Y <- durs[durs$sound.files == x, , drop = FALSE]
+      sq <- seq(0, Y$duration, length.out = 4)
+      
+    df <-  data.frame(sound.files = Y$sound.files[1], selec = 1:(length(sq) - 1), start = sq[-length(sq)], end = sq[-1], dir = pth, stringsAsFactors = FALSE)
+      
+    })
+
+    splt3 <- do.call(rbind, out)
+
+  
+    # expand grid over several parameter value combinations
+prm.cmbs <- expand.grid(threshold = seq(5, 25, by = 2), ssmooth = seq(300, 1500, length.out = 4), bp1 = 1:2, bp2 = 6:8)
+
+prm.cmbs <- prm.cmbs
+
+pboptions(type = "timer")
+
+# detections
+dtcns <- list()
+
+# and good detections count
+true.pstv <- list()
+
+# run each combination
+for(x in 1:nrow(prm.cmbs)){
+    
+   # autodetec new files
+    ad <- autodetec(X = splt3, threshold = prm.cmbs$threshold[x], ssmooth = prm.cmbs$ssmooth[x], bp = c(prm.cmbs$bp1[x], prm.cmbs$bp2[x]), wl = 300, mindur = 0.02, maxdur = 0.3, img = FALSE, parallel = parallel::detectCores() - 1, redo = FALSE, path = splt3$dir[1], pb = FALSE)
+  
+  # remove NA rows
+  ad <- ad[!is.na(ad$start), , drop = FALSE]
+
+  if (nrow(ad) > 0)
+{  
+  nr <- 2
+  new_nr <- 3
+  ad2 <- ad  
+  while(nr != new_nr)  
+{
+    nr <- nrow(ad2)  
+  ad2 <- merge_sels(X = ad2, mar = 0.05, parallel = parallel::detectCores() - 1, pb = FALSE)
+  
+  new_nr <- nrow(ad2)
+  }
+  
+  ad2$source <- "ad"
+  
+  ad3 <- freq_range(ad2, wl = 300, path = splt3$dir[1], parallel = parallel::detectCores() - 1, pb = FALSE)
+  
+  ad3$bottom.freq <- ifelse(is.na(ad3$bottom.freq), 0, ad3$bottom.freq)
+  ad3$top.freq <- ifelse(is.na(ad3$top.freq), 10, ad3$top.freq)
+  
+  ad4 <- ad3[,intersect(names(ad3), names(man.sls))]
+  mnsl <- man.sls[,intersect(names(ad3), names(man.sls))]
+  
+  ad.mn <- rbind(ad4, mnsl)
+  
+  ad.mn$dur <- ad.mn$end - ad.mn$start
+  
+  ovlp <- ovlp_sels2(X = ad.mn, max.ovlp = 0.03, parallel = parallel::detectCores() - 1, pb = FALSE)
+
+  ovlp$detection <- "bad"
+  
+  ovlp$detection[ovlp$ovlp.sels %in% ovlp$ovlp.sels[ovlp$source == "manual"] & ovlp$source == "ad"] <- "good"
+  
+  # table(ovlp$detection, ovlp$source)
+  
+  ovlp <- ovlp[ovlp$source == "ad", ]
+  
+  } else
+      ovlp <- data.frame(detection = "bad")
+
+print(paste0("progress = " , round(x / nrow(prm.cmbs) * 100, 2), "%"))  
+  
+print(paste("parameters: threshold =", prm.cmbs$threshold[x], "ssmooth =", prm.cmbs$ssmooth[x], "bp =", paste0(prm.cmbs$bp1[x], "-", prm.cmbs$bp2[x])))
+
+print(paste0(round(sum(ovlp$detection == "good") / nrow(man.sls) * 100, 2), "% of calls detected"))
+
+
+dtcns[[length(dtcns) + 1]] <- ovlp
+
+true.pstv[[length(true.pstv) + 1]] <- data.frame(prm.cmbs[x, , drop = FALSE], true.positive = sum(ovlp$detection == "good"), false.positive = sum(ovlp$detection != "good") )
+}
+  
+  
+length(dtcns)
+length(true.pstv)
+
+# true positives
+tp <- do.call(rbind, true.pstv)
+
+tp.good <- tp[tp$true.positive == 29, ]
+
+
+summary(tp.good)
+
+
+# ad <- autodetec(X = splt3, threshold = median(tp.good$threshold), ssmooth = median(tp.good$ssmooth), bp = c(median(tp.good$bp1), median(tp.good$bp2)), wl = 300, mindur = 0.02, maxdur = 0.3, img = FALSE, parallel = parallel::detectCores() - 1, redo = FALSE, path = splt3$dir[1], pb = FALSE)
+
+
+
+
+```
+
+```{r select some spectros for manual sorting, eval = FALSE}
+
+imgs <- list.files(path = spectro_files_DONT_TOUCH)
+
+trgt <- c("160YGHM/11_10_19", "360YGHM/10_29_19", "300YGHM/11_04_19", "396YBHM/11_07_19", "270YGHM/11_09_19", "356WBHM/11_04_19")
+
+
+
+
+org.sf <- sapply(strsplit(imgs, ".wav",fixed=T), "[",1)
+
+
+img.df <- data.frame(imgs, org.sf, stringsAsFactors = FALSE)
+
+# start by reading all files
+wvs <- list.files(pattern = "\\.wav$", full.names = TRUE, recursive = TRUE, path = syn_drive)
+
+# put them in a data frame
+wvs_df <- data.frame(file = basename(wvs), dir = dirname(wvs), full.name = wvs, stringsAsFactors = FALSE)
+
+wvs_df$org.sf <- gsub(".wav", "", wvs_df$file)
+
+
+img.df2 <- merge(img.df, wvs_df, by = "org.sf")
+
+nrow(img.df2)
+
+img.df2$dir2 <- gsub("/media/twright/DATA/SynologyDrive//", "", img.df2$dir)
+
+
+img.df2 <- img.df2[img.df2$dir2 %in% trgt, ]
+
+img.df2$imgs
+
+
+   # copy those new files to folder with spectros that can be modified
+file.copy(to = file.path("/media/twright/DATA/SynologyDrive/sub_spectros/", img.df2$imgs), from = file.path(spectro_files_DONT_TOUCH, img.df2$imgs))
+      
+      
+
+```
+
+
+
+```{r check manual sorting, eval = FALSE}
+
+ad <- read.csv("Rcode/autodetections.csv", stringsAsFactors = FALSE)
+
+imgs <- list.files(path = "/media/twright/DATA/SynologyDrive/sub_spectros/")
+
+ad$indvs <- sapply(strsplit(ad$sound.files, "_",fixed=T), "[", 1)
+ad$name  <- sapply(strsplit(ad$sound.files, ".wav",fixed=T), "[", 1)
+
+
+indvs <- sapply(strsplit(imgs, "_", fixed = T), "[", 1)
+name <- sapply(strsplit(imgs, ".wav", fixed = T), "[", 1)
+
+ad <- ad[ad$name %in% name, ]
+
+nrow(ad)
+length(imgs)
+
+
+ad$imgs <- paste0(ad$sound.files, "-", ad$selec, ".tiff")
+
+# get selected ones
+call.imgs <- list.files(path = "/media/twright/DATA/SynologyDrive/Pipeline_Good_Call_Spectros/", pattern = "tiff$")
+
+
+calls <- filter_sels(ad, path =  "/media/twright/DATA/SynologyDrive/Pipeline_Good_Call_Spectros/", it = "tiff", index = TRUE)
+
+no.calls <- filter_sels(ad, path =  "/media/twright/DATA/SynologyDrive/Pipeline_Good_Call_Spectros/", it = "tiff", missing = TRUE, index = TRUE)
+
+
+ad$type <- "noise"
+
+ad$type[calls] <- "call"
+
+
+ad.no.dup <- ad[!duplicated(ad$sound.files), ]
+
+# consolidate(files = file.path(ad.no.dup$orignal.dir, unique(ad.no.dup$sound.files)))
+
+
+warbleR_options(parallel = 7,  bp = c(0.5, 8), wl = 300, path =  "/media/twright/DATA/SynologyDrive/consolidated_files/")
+
+cs <- check_sels(ad)
+
+sp <- specan(ad)
+
+mc <-mfcc_stats(ad)
+
+sp$type <- ad$type
+
+sp2 <- merge(sp, mc)
+
+write.csv(sp2, "./Rcode/spectral.mfcc.parameters.manually.classified.csv", row.names = FALSE)
+
+
+```
+
+
+```{r random forest to classified calls from noise in autodetec output}
+
+sp2 <- read.csv("./Rcode/spectral.mfcc.parameters.manually.classified.csv", stringsAsFactors = FALSE)
+
+# # run random forest
+
+out <- pblapply(1:100, function(x){
+  
+  train.idx <- c(sample(no.calls, 0.75 * length(no.calls)), sample(calls, 0.75 * length(calls)))
+  test.idx <- (1:nrow(ad))[!1:nrow(ad) %in% train.idx]
+  
+  ## Prediction
+  sp.train <- sp2[train.idx, ]
+  sp.test <- sp2[-train.idx, ]
+  rg.sp <- ranger(type ~ ., data = sp.train[,-c(1:2)], num.trees = 10000)
+  pred.sp <- predict(rg.sp, data = sp.test[,-c(1:2)])
+ tab <- table(sp.test$type, pred.sp$predictions)  
+ 
+ return(c(tab))
+})
+
+
+perf <- do.call(rbind, out)
+
+cs <- colSums(perf)
+#accuracy
+cs[2] / cs[1]
+
+
+# full model
+full.rg.sp <- ranger(type ~ ., data = sp2[,-c(1:2)], num.trees = 100000)
+
+rf.error <- full.rg.sp$prediction.error
+
+saveRDS(full.rg.sp, "./Rcode/predictive_model_call_vs_noise.RDS")
+
+```
+
+
+
+
+
+```{r measure parameters for random forest, eval = FALSE}
+
+# read the data with the detections from files that have been already processed
+ad <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/autodetections.csv", stringsAsFactors = FALSE)
+
+# remove duplicates
+ad$num <- 1
+
+for(i in 2:nrow(ad))
+  if(ad$sound.files[i] != ad$sound.files[i - 1]) 
+  ad$num[i] <- ad$num[i - 1] + 1 else ad$num[i] <- ad$num[i - 1] 
+
+# View(ad)
+
+a <- tapply(ad$num, ad$sound.files, function(x) length(unique(x)), simplify = TRUE)
+
+# remove the ones that were analyzed more than once
+adrep <- ad[ad$sound.files %in% names(a)[a == 2],]
+
+adrep <- adrep[order(adrep$sound.files), ]
+
+
+ad <- ad[!ad$num %in% c(3188, 3189),]
+
+nrow(ad)
+
+ad.non.dup <- ad[!duplicated(ad$sound.files), ]
+
+
+
+# consolidate(files = file.path(ad.non.dup$orignal.dir, ad.non.dup$sound.files), dest.path = "/media/twright/DATA/SynologyDrive/consolidated_files/")
+
+warbleR_options(parallel = 7,  bp = c(0.5, 8), wl = 300, path =  "/media/twright/DATA/SynologyDrive/consolidated_files/")
+
+cs <- check_sels(ad)
+
+sp <- specan(ad)
+
+mc <-mfcc_stats(ad)
+
+sp$type <- ad$type
+
+sp2 <- merge(sp, mc)
+
+ad$num <- NULL
+
+sp3 <- merge(sp2, ad)
+
+
+write.csv(sp3, "./Rcode/spectral.mfcc.parameters.all.detections.csv", row.names = FALSE)
+
+
+```
+
+```{r}
+
+sp <- read.csv("./Rcode/spectral.mfcc.parameters.all.detections.csv", stringsAsFactors = FALSE)
+
+# nrow(sp)
+
+rfmod <- readRDS("./Rcode/predictive_model_call_vs_noise.RDS")
+
+sps <- split(sp, f = sp$sound.files)
+
+# pred.sp <- predict(rfmod, data = sp[,-c(1:2)])
+
+preds <- pblapply(sps, function(x) {
+  y <- predict(rfmod, data = x[, !names(x) %in% c("sound.files", "selec", "start", "end", "SNR", "orignal.dir")])
+  x$pred <-y$predictions
+  return(x)
+  })
+
+pred.sp <- do.call(rbind, preds)
+
+table(pred.sp$pred)
+
+write.csv(pred.sp, "./Rcode/spectral.mfcc.parameters.all.detections.predicted.csv", row.names = FALSE)
+
+```
+
+# create spectros from random forest classification
+```{r}
+
+pred.sp <- read.csv("./Rcode/spectral.mfcc.parameters.all.detections.predicted.csv", stringsAsFactors = FALSE)
+
+prd.calls <- pred.sp[pred.sp$pred == "call", ]
+prd.noise <- pred.sp[pred.sp$pred == "noise", ]
+
+warbleR_options(flim = c(1, 9), ovlp = 50, parallel = parallel::detectCores() - 1, it = "tiff", wav.path = "/media/twright/DATA/SynologyDrive/consolidated_files/", pb = TRUE, fast.spec = FALSE, wl = 300, osci = TRUE, res = 70)
+
+
+prd.calls.frq <- frange(prd.calls, bp = c(0.5, 10), threshold = 5, img = FALSE)
+
+
+prd.calls.frq$bottom.freq[is.na(prd.calls.frq$bottom.freq)] <- min(prd.calls.frq$bottom.freq, na.rm = TRUE)
+
+prd.calls.frq$top.freq[is.na(prd.calls.frq$top.freq)] <- max(prd.calls.frq$top.freq, na.rm = TRUE)
+
+
+prd.calls.frq$bird <- sapply(strsplit(prd.calls.frq$sound.files, "_",fixed=T), "[", 1)
+
+write.csv(prd.calls.frq, "/media/twright/DATA/SynologyDrive/Rcode/spectral.mfcc.parameters.call.detections.with.freq.range.csv", row.names = FALSE)
+
+write.csv(prd.noise, "/media/twright/DATA/SynologyDrive/Rcode/spectral.mfcc.parameters.noise.detections.csv", row.names = FALSE)
+
+
+```
+
+# spectrograms and catalogs
+```{r}
+
+prd.calls.frq <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/spectral.mfcc.parameters.call.detections.with.freq.range.csv", stringsAsFactors = FALSE)
+
+prd.noise <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/spectral.mfcc.parameters.noise.detections.csv", stringsAsFactors = FALSE)
+
+
+specreator(X = prd.calls.frq,  dest.path = '/media/twright/DATA/SynologyDrive/random_forest_classification/calls/')
+
+specreator(X = prd.noise,  dest.path = '/media/twright/DATA/SynologyDrive/random_forest_classification/noise')
+
+
+# catalogs
+setwd("/media/twright/DATA/SynologyDrive/consolidated_files/")
+
+trc <- function(n) terrain.colors(n = n, alpha = 0.2)
+
+
+warbleR_options(flim = c(0.8, 12.5), ovlp = 50, parallel = parallel::detectCores() - 1, it = "jpeg", wav.path = "/media/twright/DATA/SynologyDrive/consolidated_files/", pb = TRUE, fast.spec = TRUE, wl = 300, osci = TRUE, res = 70)
+
+
+catalog(X = prd.calls.frq, nrow = 10, ncol = 10, same.time.scale = T, mar = 0.01, legend = 0 , group.tag = "bird", spec.mar = 1, labels = c("sound.files","selec"), max.group.cols = 5, title = "Detected calls", ovlp = 95, box = FALSE,
+ width = 10 * 2.3, height = 5 * 3, tag.pal = list(trc), hatching = 0, cex = 1.3,  pal = monitoR::gray.3, img.suffix = "detected.calls", rm.axes = TRUE, path = "/media/twright/DATA/SynologyDrive/consolidated_files/")  
+   
+move.imgs(from = .Options$warbleR$path, to = "/media/twright/DATA/SynologyDrive/random_forest_classification/call_catalogs/", overwrite = T, cut = T, pb = FALSE)
+
+catalog2pdf(path = "/media/twright/DATA/SynologyDrive/random_forest_classification/call_catalogs/", by.img.suffix = TRUE)
+
+
+catalog(X = prd.noise, flim = c(0.8, 12.5), nrow = 10, ncol = 10, same.time.scale = T, mar = 0.01, legend = 0 ,  group.tag = "sound.files", spec.mar = 1, labels = c("sound.files","selec"), max.group.cols = 5, title = "Detected noise", ovlp = 95, box = FALSE,
+ width = 10 * 2.3, height = 5 * 3, tag.pal = list(trc), hatching = 0, cex = 1.3,  pal = monitoR::gray.3, img.suffix = "noise", rm.axes = TRUE, path = "/media/twright/DATA/SynologyDrive/consolidated_files/")  
+
+move.imgs(from = .Options$warbleR$path, to = "/media/twright/DATA/SynologyDrive/random_forest_classification/noise_catalogs/", overwrite = T, cut = T, pb = FALSE)
+
+set.seed(10)
+smp <- sample(1:nrow(prd.noise), 1000)
+
+catalog(X = prd.noise[smp, ], flim = c(0.8, 12.5), nrow = 10, ncol = 10, same.time.scale = T, mar = 0.01, legend = 0 ,  group.tag = "sound.files", spec.mar = 1, labels = c("sound.files","selec"), max.group.cols = 5, title = "Detected noise", ovlp = 95, box = FALSE,
+ width = 10 * 2.3, height = 5 * 3, tag.pal = list(trc), hatching = 0, cex = 1.3,  pal = monitoR::gray.3, img.suffix = "noise", rm.axes = TRUE, path = "/media/twright/DATA/SynologyDrive/consolidated_files/")  
+
+move.imgs(from = .Options$warbleR$path, to = "/media/twright/DATA/SynologyDrive/random_forest_classification/subset_noise_catalogs/", overwrite = T, cut = T, pb = FALSE)
+
+catalog2pdf(path = "/media/twright/DATA/SynologyDrive/random_forest_classification/subset_noise_catalogs/", by.img.suffix = TRUE)
+
+
+length(unique(prd.calls.frq$sound.files))/ nrow(prd.calls.frq)
+
+mean(table(prd.calls.frq$sound.files))
+
+
+seltailor(prd.calls.frq, ext.window = FALSE, mar = 0.09, auto.next = TRUE, pause = 0.1, fast.spec = FALSE, osci = FALSE, collevels = seq(-60, 0, 5), flim = c(0.9, 9), wl = 300)
+
+```
+
+
+```{r code to tailor calls, eval = FALSE}
+
+library(warbleR)
+
+prd.calls.frq <- read.csv("/media/twright/DATA/SynologyDrive/Rcode/spectral.mfcc.parameters.call.detections.with.freq.range.csv", stringsAsFactors = FALSE)
+
+warbleR_options(flim = c(0.9, 9), ovlp = 90, parallel = parallel::detectCores() - 1, wav.path = "/media/twright/DATA/SynologyDrive/consolidated_files/", fast.spec = FALSE, wl = 300, osci = FALSE)
+
+seltailor(prd.calls.frq, ext.window = TRUE, mar = 0.09, auto.next = TRUE, pause = 0.1, collevels = seq(-60, 0, 5))
+
+
+
+```
+
+
+```{r check seltailor, eval= TRUE}
+
+st <- read.csv("/media/twright/DATA/SynologyDrive/consolidated_files/seltailor_output.csv", stringsAsFactors = FALSE)
+
+table(st$tailored)
+
+
+warbleR_options(flim = c(0.9, 9), ovlp = 90, parallel = parallel::detectCores() - 1, wav.path = "/media/twright/DATA/SynologyDrive/consolidated_files/", fast.spec = FALSE, wl = 300, osci = FALSE)
+
+specreator(X = st,  dest.path = '/media/twright/DATA/SynologyDrive/spectros_seltailor/')
+
+write.csv(st, "/media/twright/DATA/SynologyDrive/tailored_budgie_calls_sel_tab.csv", row.names = FALSE)
+
+```
+
+
+
+```{r measure parameters, eval= FALSE}
+
+sls <- read.csv("/media/twright/DATA/SynologyDrive/tailored_budgie_calls_sel_tab.csv", stringsAsFactors = FALSE)
+
+warbleR_options(flim = c(0.5, 6), ovlp = 90, parallel = parallel::detectCores() - 1, wav.path = "/media/twright/DATA/SynologyDrive/consolidated_files/", fast.spec = FALSE, wl = 300, osci = FALSE)
+
+sls <- check_sels(sls)
+
+sls <- sls[sls$duration > 0.01, ]
+
+sels.sp <- specan(X = sls, fast = T)
+
+setwd("/media/twright/DATA/SynologyDrive/")
+
+saveRDS(sels.sp, "SP results long term budgie calls 2020.RDS")
+
+mfcc <- mfcc_stats(sls)
+
+saveRDS(mfcc, "MFCC results long term budgie calls 2020.RDS")
+
+sels.DTW <- dfDTW(X = sls, wl = 300, length.out = 50, clip.edges = TRUE, img = FALSE, threshold = 5)
+
+saveRDS(sels.DTW, "DTW results budgie calls 2020.RDS")
+
+### 3 dimensions
+mds.dtw  <- cmdscale(sels.DTW, k = 5) 
+
+# mds_dtw3 <- bootmds(fit, sels.DTW, method.dat = "pearson", nrep = 10)
+
+saveRDS(mds.dtw, "MDS 5 dimensions on DTW distances 2020.RDS")
+
+```
+
+
+```{r put metrics together, eval = FALSE}
+
+sls <- read.csv("/media/twright/DATA/SynologyDrive/tailored_budgie_calls_sel_tab.csv", stringsAsFactors = FALSE)
+
+sls <- check_sels(sls)
+
+sls <- sls[sls$duration > 0.01, ]
+
+mds.dtw <- readRDS("MDS 5 dimensions on DTW distances 2020.RDS")
+
+sels.sp <- readRDS("SP results long term budgie calls 2020.RDS")
+
+mfcc <- readRDS("MFCC results long term budgie calls 2020.RDS")
+
+colnames(mds.dtw) <- paste0("DTW.D", 1:ncol(mds.dtw))
+
+all.ap <- cbind(sls, mds.dtw, sels.sp[, -c(1, 2)], mfcc[, -c(1, 2)])
+
+write.csv(all.ap, "Acoustic parameters budgie call 2020.csv", row.names = F)
+
+```
+

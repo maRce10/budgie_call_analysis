@@ -1,1 +1,24 @@
 ]0;/home/m/sda5/Dropbox/Projects/budgie_call_analysis]0;m@m-MacBookPro: ~/sda5/Dropbox/Projects/budgie_call_analysis[01;32mm@m-MacBookPro[00m:[01;34m~/sda5/Dropbox/Projects/budgie_call_annalysis[00m$ git add.[K .
+]0;/home/m/sda5/Dropbox/Projects/budgie_call_analysis]0;m@m-MacBookPro: ~/sda5/Dropbox/Projects/budgie_call_analysis[01;32mm@m-MacBookPro[00m:[01;34m~/sda5/Dropbox/Projects/budgie_call_annalysis[00m$ git commit - [Km "1st commit"
+[master 6ab2035] 1st commit
+ 8 files changed, 7838 insertions(+)
+ create mode 100644 .Rproj.user/8E659706/console06/9DB11A5A
+ create mode 100644 .Rproj.user/8E659706/console06/INDEX001
+ create mode 100644 .Rproj.user/8E659706/sources/s-49877899/lock_file
+ create mode 100644 .Rproj.user/shared/notebooks/patch-chunk-names
+ create mode 100644 budgie_call_analysis.Rproj
+ create mode 100755 scripts/Budgie call analysis LONGTERM.Rmd
+ create mode 100644 scripts/Random forest acoustic space budgies 2018.Rmd
+ create mode 100644 scripts/Random forest acoustic space budgies 2019.Rmd
+]0;/home/m/sda5/Dropbox/Projects/budgie_call_analysis]0;m@m-MacBookPro: ~/sda5/Dropbox/Projects/budgie_call_analysis[01;32mm@m-MacBookPro[00m:[01;34m~/sda5/Dropbox/Projects/budgie_call_annalysis[00m$ git push
+Username for 'https://github.com': maRc10  e10
+Password for 'https://maRce10@github.com': 
+Contando objetos: 17, listo.
+Delta compression using up to 4 threads.
+Comprimiendo objetos:   8% (1/12)   Comprimiendo objetos:  16% (2/12)   Comprimiendo objetos:  25% (3/12)   Comprimiendo objetos:  33% (4/12)   Comprimiendo objetos:  41% (5/12)   Comprimiendo objetos:  50% (6/12)   Comprimiendo objetos:  58% (7/12)   Comprimiendo objetos:  66% (8/12)   Comprimiendo objetos:  75% (9/12)   Comprimiendo objetos:  83% (10/12)   Comprimiendo objetos:  91% (11/12)   Comprimiendo objetos: 100% (12/12)   Comprimiendo objetos: 100% (12/12), listo.
+Escribiendo objetos:   5% (1/17)   Escribiendo objetos:  11% (2/17)   Escribiendo objetos:  17% (3/17)   Escribiendo objetos:  23% (4/17)   Escribiendo objetos:  29% (5/17)   Escribiendo objetos:  35% (6/17)   Escribiendo objetos:  41% (7/17)   Escribiendo objetos:  47% (8/17)   Escribiendo objetos:  52% (9/17)   Escribiendo objetos:  58% (10/17)   Escribiendo objetos:  64% (11/17)   Escribiendo objetos:  70% (12/17)   Escribiendo objetos:  76% (13/17)   Escribiendo objetos:  82% (14/17)   Escribiendo objetos:  88% (15/17)   Escribiendo objetos: 100% (17/17)   Escribiendo objetos: 100% (17/17), 37.50 KiB | 3.41 MiB/s, listo.
+Total 17 (delta 1), reused 0 (delta 0)
+remote: Resolving deltas:   0% (0/1)[Kremote: Resolving deltas: 100% (1/1)[Kremote: Resolving deltas: 100% (1/1), done.[K
+To https://github.com/maRce10/budgie_call_analysis.git
+   f8b3000..6ab2035  master -> master
+]0;/home/m/sda5/Dropbox/Projects/budgie_call_analysis]0;m@m-MacBookPro: ~/sda5/Dropbox/Projects/budgie_call_analysis[01;32mm@m-MacBookPro[00m:[01;34m~/sda5/Dropbox/Projects/budgie_call_annalysis[00m$ git add .

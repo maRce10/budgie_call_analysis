@@ -1,0 +1,492 @@
+PackratFormat: 1.4
+PackratVersion: 0.5.0
+RVersion: 3.6.1
+Repos: CRAN=https://cloud.r-project.org
+
+Package: BH
+Source: CRAN
+Version: 1.72.0-3
+
+Package: DT
+Source: CRAN
+Version: 0.13
+Requires: htmltools, jsonlite, magrittr, crosstalk, htmlwidgets,
+    promises
+
+Package: R6
+Source: CRAN
+Version: 2.4.1
+
+Package: RColorBrewer
+Source: CRAN
+Version: 1.1-2
+
+Package: Rcpp
+Source: CRAN
+Version: 1.0.4.6
+Hash: 8b95553bc32a59321b8981aa02bfbf72
+
+Package: RcppEigen
+Source: CRAN
+Version: 0.3.3.7.0
+Requires: Rcpp
+
+Package: askpass
+Source: CRAN
+Version: 1.1
+Requires: sys
+
+Package: assertthat
+Source: CRAN
+Version: 0.2.1
+
+Package: backports
+Source: CRAN
+Version: 1.1.7
+Hash: eac10bc96ef812453ce7f242aa67aafe
+
+Package: base64enc
+Source: CRAN
+Version: 0.1-3
+Hash: c590d29e555926af053055e23ee79efb
+
+Package: brew
+Source: CRAN
+Version: 1.0-6
+
+Package: callr
+Source: CRAN
+Version: 3.4.3
+Requires: R6, processx
+
+Package: cli
+Source: CRAN
+Version: 2.0.2
+Requires: glue, assertthat, crayon, fansi
+
+Package: clipr
+Source: CRAN
+Version: 0.7.0
+
+Package: colorspace
+Source: CRAN
+Version: 1.4-1
+
+Package: commonmark
+Source: CRAN
+Version: 1.7
+
+Package: corrplot
+Source: CRAN
+Version: 0.84
+
+Package: covr
+Source: CRAN
+Version: 3.5.0
+Requires: digest, jsonlite, yaml, crayon, httr, rex, withr
+
+Package: crayon
+Source: CRAN
+Version: 1.3.4
+
+Package: crosstalk
+Source: CRAN
+Version: 1.1.0.1
+Requires: htmltools, jsonlite, R6, lazyeval
+
+Package: curl
+Source: CRAN
+Version: 4.3
+
+Package: desc
+Source: CRAN
+Version: 1.2.0
+Requires: rprojroot, R6, assertthat, crayon
+
+Package: devtools
+Source: CRAN
+Version: 2.3.0
+Requires: digest, glue, jsonlite, rlang, DT, callr, cli, covr, crayon,
+    desc, ellipsis, git2r, httr, memoise, pkgbuild, pkgload, rcmdcheck,
+    remotes, roxygen2, rstudioapi, rversions, sessioninfo, testthat,
+    usethis, withr
+
+Package: digest
+Source: CRAN
+Version: 0.6.25
+Hash: ec0a673866797c8c1fc1daa359fb4cad
+
+Package: ellipsis
+Source: CRAN
+Version: 0.3.1
+Requires: rlang
+
+Package: evaluate
+Source: CRAN
+Version: 0.14
+Hash: 18306cc3bc1aec7b7360eea8a0eb0ee1
+
+Package: fansi
+Source: CRAN
+Version: 0.4.1
+
+Package: farver
+Source: CRAN
+Version: 2.0.3
+
+Package: fs
+Source: CRAN
+Version: 1.4.1
+
+Package: ggplot2
+Source: CRAN
+Version: 3.3.1
+Requires: digest, glue, rlang, gtable, isoband, scales, tibble, withr
+
+Package: gh
+Source: CRAN
+Version: 1.1.0
+Requires: jsonlite, cli, httr, ini
+
+Package: git2r
+Source: CRAN
+Version: 0.27.1
+
+Package: glue
+Source: CRAN
+Version: 1.4.1
+Hash: 740ccee1066d96aeb3f4d1e571245913
+
+Package: gtable
+Source: CRAN
+Version: 0.3.0
+
+Package: highr
+Source: CRAN
+Version: 0.8
+Hash: 16aa2cc98d7b68c9d148c263c8dcdbcd
+
+Package: htmltools
+Source: CRAN
+Version: 0.4.0
+Requires: Rcpp, digest, rlang
+Hash: 140efd8a56fc8404e81f7ac44731ce47
+
+Package: htmlwidgets
+Source: CRAN
+Version: 1.5.1
+Requires: htmltools, jsonlite, yaml
+
+Package: httr
+Source: CRAN
+Version: 1.4.1
+Requires: jsonlite, mime, R6, curl, openssl
+
+Package: ini
+Source: CRAN
+Version: 0.3.1
+
+Package: isoband
+Source: CRAN
+Version: 0.2.1
+Requires: Rcpp, testthat
+
+Package: jsonlite
+Source: CRAN
+Version: 1.6.1
+Hash: bfde5e6072ca0f5226f49e457a9ba62d
+
+Package: knitr
+Source: CRAN
+Version: 1.28
+Requires: evaluate, highr, markdown, stringr, xfun, yaml
+Hash: 408899ff6416ccf790182c95c8fa9c81
+
+Package: labeling
+Source: CRAN
+Version: 0.3
+
+Package: later
+Source: CRAN
+Version: 1.0.0
+Requires: Rcpp, rlang, BH
+
+Package: lazyeval
+Source: CRAN
+Version: 0.2.2
+
+Package: lifecycle
+Source: CRAN
+Version: 0.2.0
+Requires: glue, rlang
+
+Package: lme4
+Source: CRAN
+Version: 1.1-23
+Requires: Rcpp, RcppEigen, minqa, nloptr, statmod
+
+Package: lmerTest
+Source: CRAN
+Version: 3.1-2
+Requires: ggplot2, lme4, numDeriv
+
+Package: magrittr
+Source: CRAN
+Version: 1.5
+Hash: bdc4d48c3135e8f3b399536ddf160df4
+
+Package: markdown
+Source: CRAN
+Version: 1.1
+Requires: mime, xfun
+Hash: 1b6a18fd395589425e338a47b999099f
+
+Package: memoise
+Source: CRAN
+Version: 1.1.0
+Requires: digest
+
+Package: mime
+Source: CRAN
+Version: 0.9
+Hash: f3388735b4ddea072aff3be44f7f4968
+
+Package: minqa
+Source: CRAN
+Version: 1.2.4
+Requires: Rcpp
+
+Package: monitoR
+Source: CRAN
+Version: 1.0.7
+Requires: tuneR
+
+Package: munsell
+Source: CRAN
+Version: 0.5.0
+Requires: colorspace
+
+Package: nloptr
+Source: CRAN
+Version: 1.2.2.1
+
+Package: numDeriv
+Source: CRAN
+Version: 2016.8-1.1
+
+Package: openssl
+Source: CRAN
+Version: 1.4.1
+Requires: askpass
+
+Package: packrat
+Source: CRAN
+Version: 0.5.0
+Hash: 498643e765d1442ba7b1160a1df3abf9
+
+Package: pbapply
+Source: CRAN
+Version: 1.4-2
+
+Package: pillar
+Source: CRAN
+Version: 1.4.4
+Requires: rlang, cli, crayon, fansi, utf8, vctrs
+
+Package: pkgbuild
+Source: CRAN
+Version: 1.0.8
+Requires: rprojroot, R6, callr, cli, crayon, desc, prettyunits, withr
+
+Package: pkgconfig
+Source: CRAN
+Version: 2.0.3
+
+Package: pkgload
+Source: CRAN
+Version: 1.1.0
+Requires: rlang, rprojroot, cli, crayon, desc, pkgbuild, rstudioapi,
+    withr
+
+Package: praise
+Source: CRAN
+Version: 1.0.0
+
+Package: prettyunits
+Source: CRAN
+Version: 1.1.1
+
+Package: processx
+Source: CRAN
+Version: 3.4.2
+Requires: R6, ps
+
+Package: promises
+Source: CRAN
+Version: 1.1.0
+Requires: Rcpp, magrittr, rlang, R6, later
+
+Package: ps
+Source: CRAN
+Version: 1.3.3
+
+Package: purrr
+Source: CRAN
+Version: 0.3.4
+Requires: magrittr, rlang
+
+Package: rcmdcheck
+Source: CRAN
+Version: 1.3.3
+Requires: digest, rprojroot, R6, callr, cli, crayon, desc, pkgbuild,
+    prettyunits, sessioninfo, withr, xopen
+
+Package: rematch2
+Source: CRAN
+Version: 2.1.2
+Requires: tibble
+
+Package: remotes
+Source: CRAN
+Version: 2.1.1
+
+Package: rex
+Source: CRAN
+Version: 1.2.0
+Requires: lazyeval
+
+Package: rlang
+Source: CRAN
+Version: 0.4.6
+Hash: 961439fc46343c94eb50973664feee76
+
+Package: rmarkdown
+Source: CRAN
+Version: 2.2
+Requires: base64enc, evaluate, htmltools, jsonlite, knitr, mime,
+    stringr, tinytex, xfun, yaml
+Hash: 7ba24104e911a61aefc239bb3b719af0
+
+Package: roxygen2
+Source: CRAN
+Version: 7.1.0
+Requires: Rcpp, digest, knitr, rlang, stringi, stringr, R6, brew,
+    commonmark, desc, pkgload, purrr, xml2
+
+Package: rprojroot
+Source: CRAN
+Version: 1.3-2
+Requires: backports
+Hash: a25c3f70c166fb3fbabc410eb32b6366
+
+Package: rstudioapi
+Source: CRAN
+Version: 0.11
+
+Package: rversions
+Source: CRAN
+Version: 2.0.2
+Requires: curl, xml2
+
+Package: scales
+Source: CRAN
+Version: 1.1.1
+Requires: R6, RColorBrewer, farver, labeling, lifecycle, munsell,
+    viridisLite
+
+Package: sessioninfo
+Source: CRAN
+Version: 1.1.1
+Requires: cli, withr
+
+Package: signal
+Source: CRAN
+Version: 0.7-6
+
+Package: statmod
+Source: CRAN
+Version: 1.4.34
+
+Package: stringi
+Source: CRAN
+Version: 1.4.6
+Hash: 076b0f115b37ca6d551ccff96b91114e
+
+Package: stringr
+Source: CRAN
+Version: 1.4.0
+Requires: glue, magrittr, stringi
+Hash: 67da32dbb2a7a16f2ef124336358e54a
+
+Package: sys
+Source: CRAN
+Version: 3.3
+
+Package: testthat
+Source: CRAN
+Version: 2.3.2
+Requires: digest, evaluate, magrittr, rlang, R6, cli, crayon, ellipsis,
+    pkgload, praise, withr
+
+Package: tibble
+Source: CRAN
+Version: 3.0.1
+Requires: magrittr, rlang, cli, crayon, ellipsis, fansi, lifecycle,
+    pillar, pkgconfig, vctrs
+
+Package: tinytex
+Source: CRAN
+Version: 0.23
+Requires: xfun
+Hash: 967767067a1b266247b2cd4b6ddb47ba
+
+Package: tuneR
+Source: CRAN
+Version: 1.3.3
+Requires: signal
+
+Package: usethis
+Source: CRAN
+Version: 1.6.1
+Requires: glue, rlang, rprojroot, yaml, cli, clipr, crayon, curl, desc,
+    fs, gh, git2r, purrr, rematch2, rstudioapi, whisker, withr
+
+Package: utf8
+Source: CRAN
+Version: 1.1.4
+
+Package: vctrs
+Source: CRAN
+Version: 0.3.0
+Requires: digest, glue, rlang, ellipsis
+
+Package: viridisLite
+Source: CRAN
+Version: 0.3.0
+
+Package: whisker
+Source: CRAN
+Version: 0.4
+
+Package: withr
+Source: CRAN
+Version: 2.2.0
+
+Package: xfun
+Source: CRAN
+Version: 0.14
+Hash: 94efcd6f2de13260899dd7ea5211b368
+
+Package: xml2
+Source: CRAN
+Version: 1.3.2
+
+Package: xopen
+Source: CRAN
+Version: 1.0.0
+Requires: processx
+
+Package: yaml
+Source: CRAN
+Version: 2.2.1
+Hash: 424bc11cc358f23187feaa7978628196

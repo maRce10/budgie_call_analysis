@@ -1,0 +1,23 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1591132668101.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "DBCA710A",
+    "lastKnownWriteTime" : 1591132689,
+    "last_content_update" : 1591132689706,
+    "path" : "~/sda5/Dropbox/Projects/budgie_call_analysis/scripts/autodetec_code_2019.Rmd",
+    "project_path" : "scripts/autodetec_code_2019.Rmd",
+    "properties" : {
+        "cursorPosition" : "928,0",
+        "scrollLine" : "919",
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}
