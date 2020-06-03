@@ -37,12 +37,13 @@ options("digits" = 6, "digits.secs" = 5, knitr.table.format = "html", results = 
 
 ```{r functions and parameters, eval = T, echo = F}
 
-syn_drive <- '/media/twright/DATA/SynologyDrive/'
-cons_files <- "/media/twright/DATA/SynologyDrive/consolidated_sound_files"
-spectro_files <- "/media/twright/DATA/SynologyDrive/spectros"
-spectro_files_DONT_TOUCH <- "/media/twright/DATA/SynologyDrive/backup_spectros_DONT_TOUCH"
+# syn_drive <- '/media/twright/DATA/SynologyDrive/'
+uncons_files <- "/media/twright/Seagate Portable Drive/FoxP2_GFP/"
+# spectro_files <- "/media/twright/DATA/SynologyDrive/spectros"
+# spectro_files_DONT_TOUCH <- "/media/twright/DATA/SynologyDrive/backup_spectros_DONT_TOUCH"
 # spectro_files_2 <- "/media/twright/DATA/SynologyDrive/spectros_2"
 # spectro_files_DONT_TOUCH_2 <- "/media/twright/DATA/SynologyDrive/backup_spectros_DONT_TOUCH_2"
+
 
 merge_sels <- function(X, mar, pb = TRUE, parallel = 1) {
   
@@ -213,6 +214,17 @@ ovlp_sels2 <- function (X, index = FALSE, pb = TRUE, max.ovlp = 0, relabel = FAL
 }
 
 ```
+
+```{r}
+
+cns_df <- consolidate(path = uncons_files, dest.path = "/media/twright/Seagate Portable Drive/FoxP2_GFP", parallel = 4)
+
+
+ad <- autodetec(threshold = 18, ssmooth = 750, bp = c(0.5, 8), osci = F, wl = 300, mindur = 0.02, maxdur = 0.5, img = FALSE, parallel = parallel::detectCores() - 1, redo = FALSE, path = splt3$dir[1], pb = TRUE, path = "/media/twright/Seagate Portable Drive/FoxP2_GFP")
+
+write.csv(ad, "data/autodetect_ouput.csv", row.names = FALSE)
+```
+
 
 ```{r loop over folder with files type 1, echo=F, eval=F}
 
